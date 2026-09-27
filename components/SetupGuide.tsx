@@ -165,9 +165,13 @@ FINAL_APPROVERS: {
 
         <div className="p-4 bg-emerald-100/60 rounded-xl border border-emerald-300 text-xs text-emerald-900 flex items-start gap-2">
           <i className="fas fa-info-circle text-emerald-700 text-sm mt-0.5"></i>
-          <div>
-            <strong>تذكير مهم للمسؤول:</strong> بعد نسخ كود <code className="bg-white px-1.5 py-0.5 rounded font-mono font-bold">backend/Code.gs</code> المحدث إلى مشروع Google Apps Script، يرجى إنشاء إصدار جديد من النشر عبر:
-            <span className="block mt-1 font-mono font-bold text-emerald-950">Deploy ➔ Manage Deployments ➔ Edit (أيقونة القلم) ➔ Version: New Version ➔ Deploy</span>
+          <div className="space-y-1">
+            <strong>خطوات تفعيل الشعار في ملفات الـ PDF على Google Apps Script:</strong>
+            <p className="text-emerald-950 font-normal">
+              1. افتح مشروع <strong>Google Apps Script</strong> الخاص بك.<br />
+              2. افتح ملف <code className="bg-white px-1.5 py-0.5 rounded font-mono font-bold">EmailTemplates.html</code> وانسخ محتوى الملف المحدث في المشروع (يحتوي على كود الشعار الرسمي المعتمد بدقة عالية وأبعاد ثابتة).<br />
+              3. اضغط حفظ، ثم قم بعمل نشر جديد: <span className="font-mono font-bold">Deploy ➔ Manage Deployments ➔ Edit ✏️ ➔ Version: New Version ➔ Deploy</span>.
+            </p>
           </div>
         </div>
       </div>

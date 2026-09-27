@@ -7,6 +7,7 @@ import { RequestDetails } from './components/RequestDetails';
 import { AccountModal } from './components/AccountModal';
 import { submitLeaveRequest, fetchEmployeesFromSheet, getInitialSubmitterEmail, setStoredSubmitterEmail, detectActiveGoogleUser } from './services/gasService';
 import { LeaveRequest, RequestStatus, Employee } from './types';
+import { DAKAHLIA_LOGO_BASE64, DAKAHLIA_LOGO_PATH } from './services/logoData';
 
 const ADMIN_EMAIL = 'sadat.planning.officer@dakahlia.net';
 
@@ -142,8 +143,15 @@ const App: React.FC = () => {
     <div className="max-w-6xl mx-auto py-10 px-4 font-['Tajawal'] text-right" dir="rtl">
       <header className="mb-10 flex flex-col md:flex-row items-center justify-between gap-8 bg-white p-8 rounded-3xl shadow-xl border border-blue-50">
         <div className="flex items-center gap-8">
-          <div className="w-24 h-24 bg-white p-3 rounded-2xl shadow-inner border border-gray-100 flex items-center justify-center">
-             <img src="https://i.ibb.co/LhyM4vC/dakahlia-logo.png" alt="Logo" className="w-full h-full object-contain" />
+          <div className="w-24 h-24 bg-white p-2.5 rounded-2xl shadow-inner border border-gray-100 flex items-center justify-center overflow-hidden">
+             <img 
+               src={DAKAHLIA_LOGO_BASE64} 
+               alt="شعار شركة الدقهلية للدواجن" 
+               className="w-full h-full object-contain" 
+               onError={(e) => {
+                 (e.target as HTMLImageElement).src = DAKAHLIA_LOGO_PATH;
+               }}
+             />
           </div>
           <div>
             <h1 className="text-3xl font-black text-[#1e3a8a] mb-1">نظام طلبات الإجازات الإلكتروني</h1>
