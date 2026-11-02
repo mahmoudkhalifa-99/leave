@@ -12,6 +12,9 @@ interface LeaveFormProps {
   onOpenAccountModal?: () => void;
   onAccountSelected?: (email: string, employee?: Employee) => void;
   onSubmit: (data: any) => void;
+  syncSource?: string;
+  isSyncFallback?: boolean;
+  onOpenSyncModal?: () => void;
 }
 
 export const LeaveForm: React.FC<LeaveFormProps> = ({ 
@@ -23,7 +26,10 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
   submitterEmail = '',
   onOpenAccountModal,
   onAccountSelected,
-  onSubmit 
+  onSubmit,
+  syncSource = '',
+  isSyncFallback = false,
+  onOpenSyncModal
 }) => {
   const getTodayStr = () => {
     const d = new Date();
@@ -59,18 +65,26 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
   const autoFillEmployee = (key: 'code' | 'name', value: string) => {
     const emp = employees.find(e => e[key] === value);
     if (emp) {
+      const defaultEmpEmail = emp.email || (submitterEmail && submitterEmail.includes('@') ? submitterEmail : `emp.${emp.code}@dakahlia.net`);
       setFormData(prev => ({
         ...prev,
         employeeCode: emp.code,
         employeeName: emp.name,
         department: emp.dept,
         jobTitle: emp.title || prev.jobTitle || 'موظف',
-        annualBalance: emp.annualBalance !== undefined ? emp.annualBalance : 0
+        annualBalance: emp.annualBalance !== undefined ? emp.annualBalance : 0,
+        employeeEmail: prev.employeeEmail && prev.employeeEmail.trim() ? prev.employeeEmail : defaultEmpEmail
       }));
     } else {
       setFormData(prev => ({ ...prev, [key === 'code' ? 'employeeCode' : 'employeeName']: value }));
     }
   };
+
+  useEffect(() => {
+    if (submitterEmail && (!formData.employeeEmail || !formData.employeeEmail.trim())) {
+      setFormData(prev => ({ ...prev, employeeEmail: submitterEmail.trim() }));
+    }
+  }, [submitterEmail]);
 
   useEffect(() => {
     if (formData.startDate && formData.daysCount > 0) {
@@ -94,9 +108,11 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const effectiveEmail = (formData.employeeEmail || submitterEmail || '').trim();
     onSubmit({
       ...formData,
-      submitterEmail: submitterEmail ? submitterEmail.trim() : '', // يتم تسجيله تلقائياً بحساب Google في المتصفح مثل Google Forms
+      employeeEmail: effectiveEmail,
+      submitterEmail: submitterEmail ? submitterEmail.trim() : effectiveEmail,
       displayIssueDate: formatDateDisplay(formData.issueDate),
       displayStartDate: formatDateDisplay(formData.startDate),
       displayEndDate: formatDateDisplay(formData.endDate)
@@ -149,29 +165,54 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
   return (
     <div className="space-y-8 animate-in fade-in duration-700 relative">
       {/* شريط المزامنة مع شيت Google المباشر */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-3xl shadow-lg border border-blue-800 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-5 rounded-3xl shadow-lg border border-blue-800 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-green-400">
-            <i className={`fas fa-table text-lg ${isSyncing ? 'fa-spin' : ''}`}></i>
+          <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center text-green-400 shrink-0">
+            <i className={`fas fa-table text-xl ${isSyncing ? 'fa-spin' : ''}`}></i>
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-black text-sm">مزامنة الموظفين مع شيت Google</span>
               <span className="bg-green-500/20 text-green-300 border border-green-400/30 text-[10px] px-2 py-0.5 rounded-full font-bold">
                 تبويب: data
               </span>
+              {isSyncFallback ? (
+                <span className="bg-amber-500/25 text-yellow-300 border border-yellow-400/40 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                  <i className="fas fa-exclamation-circle text-[9px]"></i>
+                  النسخة الاحتياطية (اضغط للتحميل الكامل)
+                </span>
+              ) : syncSource === 'manual_paste' ? (
+                <span className="bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                  ✓ تم استيراد كافة الصفوف يدوياً
+                </span>
+              ) : syncSource === 'apps_script' ? (
+                <span className="bg-blue-500/25 text-blue-300 border border-blue-400/40 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                  ✓ سحابي عبر Apps Script
+                </span>
+              ) : null}
             </div>
-            <p className="text-xs text-blue-200 mt-0.5">
-              تم تحميل <strong className="text-white font-mono">{employees.length}</strong> موظف برصيدهم السنوي مباشرة من الشيت
+            <p className="text-xs text-blue-200 mt-1">
+              تم تحميل <strong className="text-white font-mono text-sm underline decoration-yellow-400 font-black">{employees.length}</strong> موظف برصيدهم السنوي وبياناتهم الرسمية
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {lastSyncTime && (
-            <span className="text-[11px] text-blue-200 font-medium hidden sm:inline">
+            <span className="text-[11px] text-blue-200 font-medium hidden sm:inline ml-1">
               آخر تحديث: {lastSyncTime.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
             </span>
+          )}
+          {onOpenSyncModal && (
+            <button
+              type="button"
+              onClick={onOpenSyncModal}
+              className="px-3.5 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-yellow-400/30"
+              title="لصق أو استيراد كافة صفوف الشيت"
+            >
+              <i className="fas fa-file-import"></i>
+              <span>لصق كل الصفوف</span>
+            </button>
           )}
           {onRefreshEmployees && (
             <button
@@ -441,19 +482,24 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className={labelClasses}><i className="fas fa-envelope ml-2 text-blue-300"></i> البريد الإلكتروني للموظف صاحب الإجازة</label>
+            <label className={labelClasses}>
+              <i className="fas fa-paper-plane ml-2 text-blue-500"></i> البريد الإلكتروني للموظف صاحب الإجازة
+            </label>
+            <span className="text-[11px] bg-blue-100 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-full font-bold">
+              يُرسل الإيميل باسمه
+            </span>
           </div>
           <input 
             type="email" 
             name="employeeEmail" 
             required 
-            placeholder="employee@dakahlia.net" 
+            placeholder="مثال: employee@dakahlia.net" 
             className={inputClasses} 
             value={formData.employeeEmail} 
             onChange={handleChange} 
           />
-          <span className="text-[11px] text-gray-400 mt-1 block">
-            * هذا البريد الشخصي للموظف صاحب الإجازة لإرسال الموافقة النهائية له.
+          <span className="text-[11px] text-gray-500 mt-1 block font-medium">
+            * يتم إرسال طلب الإجازة للمدير باسم هذا البريد وتوجيه كافة الردود والاعتمادات إليه مباشرة.
           </span>
         </div>
         <div>

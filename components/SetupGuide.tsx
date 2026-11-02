@@ -36,15 +36,77 @@ export const SetupGuide: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-black/20 p-4 rounded-xl border border-white/10 text-xs">
-          <strong className="text-yellow-300 block mb-1 font-sans font-bold">ترتيب أعمدة الشيت المقروءة تلقائياً:</strong>
-          <ul className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center mt-2 font-sans">
-            <li className="bg-white/10 p-2 rounded">عمود A: <strong>كود الموظف</strong></li>
-            <li className="bg-white/10 p-2 rounded">عمود B: <strong>اسم الموظف</strong></li>
-            <li className="bg-white/10 p-2 rounded">عمود C: <strong>القسم</strong></li>
-            <li className="bg-white/10 p-2 rounded">عمود D: <strong>الوظيفة</strong></li>
-            <li className="bg-white/10 p-2 rounded">عمود E: <strong>الرصيد السنوي</strong></li>
+        <div className="bg-black/20 p-5 rounded-xl border border-white/10 text-xs space-y-3">
+          <div>
+            <strong className="text-yellow-300 block mb-1 font-sans font-bold text-sm">
+              قراءة كافة الصفوف تلقائياً بدون أي حد أقصى:
+            </strong>
+            <p className="text-emerald-100 font-sans leading-relaxed">
+              يقوم الكود الآن بسحب <strong>جميع الصفوف في تبويب data</strong> بالكامل من الصف 1 حتى آخر صف مسجل (<code className="bg-white/20 px-1 rounded font-mono">sheet.getLastRow()</code>)، مع التعرف الذكي على أسماء الأعمدة سواء بدأ الكود من العمود A أو العمود B (في حال وجود عمود مسلسل):
+            </p>
+          </div>
+          <ul className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center mt-2 font-sans">
+            <li className="bg-white/10 p-2 rounded">عمود A أو B: <strong>كود الموظف</strong></li>
+            <li className="bg-white/10 p-2 rounded">عمود B أو C: <strong>اسم الموظف</strong></li>
+            <li className="bg-white/10 p-2 rounded">عمود C أو D: <strong>القسم</strong></li>
+            <li className="bg-white/10 p-2 rounded">عمود D أو E: <strong>الرصيد السنوي</strong></li>
+            <li className="bg-white/10 p-2 rounded">عمود E أو F: <strong>الوظيفة</strong></li>
+            <li className="bg-white/10 p-2 rounded">عمود F أو G: <strong>البريد الإلكتروني</strong></li>
           </ul>
+          <div className="bg-emerald-950/40 p-3 rounded-lg border border-emerald-500/30 text-emerald-200 text-[11px] font-sans">
+            💡 <strong>ملاحظة للمسؤول:</strong> تم إضافة دالة <code className="bg-white/20 px-1 rounded font-mono text-white">getEmployeesData()</code> في ملف <code className="bg-white/20 px-1 rounded font-mono text-white">backend/Code.gs</code>. بعد تحديث السكربت ونشر نسخة جديدة، سيسحب التطبيق كافة موظفي الشيت تلقائياً. كما تم توفير زر <strong>"لصق كل الصفوف فوراً"</strong> في واجهة التطبيق للاستيراد الفوري بنقرة واحدة!
+          </div>
+        </div>
+      </div>
+
+      {/* قسم إرسال الإيميل من بريد الموظف صاحب الإجازة */}
+      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white p-8 rounded-3xl border border-blue-700 shadow-xl space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="font-black text-xl flex items-center gap-2 text-blue-300">
+            <i className="fas fa-paper-plane text-2xl text-yellow-400"></i>
+            إرسال إيميل طلب الإجازة من بريد الموظف نفسه (بدلاً من الميل الموحد)
+          </h3>
+          <span className="bg-yellow-400 text-yellow-950 text-xs px-3 py-1 rounded-full font-black">
+            تحديث مطلوب
+          </span>
+        </div>
+
+        <p className="text-sm text-blue-100 leading-relaxed">
+          بناءً على طلبكم بأن يتم إرسال الإيميل باسم وإيميل <strong>الموظف صاحب الإجازة</strong> بدلاً من الميل الموحد العام، تم تطبيق التعديلات التالية في الكود، مع توفير خياري التنفيذ:
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div className="bg-white/10 p-5 rounded-2xl border border-white/15 space-y-2">
+            <div className="flex items-center gap-2 text-yellow-300 font-black text-sm">
+              <i className="fas fa-code"></i>
+              ١. في الكود البرمجي (تم تنفيذه تلقائياً في Code.gs):
+            </div>
+            <p className="text-blue-100 leading-relaxed">
+              يقوم النظام الآن بسحب <strong>البريد الإلكتروني للموظف صاحب الإجازة</strong> (<code className="bg-white/20 px-1.5 py-0.5 rounded font-mono font-bold text-white">employeeEmail</code>) وضبطه في خيارات الإرسال:
+            </p>
+            <ul className="space-y-1 text-blue-200 list-disc list-inside">
+              <li><strong>الاسم الظاهر للمرسل (name):</strong> اسم الموظف صاحب الإجازة ليظهر في صندوق وارد المدير.</li>
+              <li><strong>الرد المباشر (replyTo):</strong> بريد الموظف صاحب الإجازة ليرد عليه المدير بضغطة زر واحدة.</li>
+              <li><strong>الإرسال المباشر (from):</strong> بريد الموظف في حال توفر صلاحية النيابة (Send-As Alias).</li>
+            </ul>
+          </div>
+
+          <div className="bg-white/10 p-5 rounded-2xl border border-white/15 space-y-2">
+            <div className="flex items-center gap-2 text-green-300 font-black text-sm">
+              <i className="fas fa-rocket"></i>
+              ٢. لإرسال الإيميل فعلياً من صندوق بريد كل موظف (Apps Script Deployment):
+            </div>
+            <p className="text-blue-100 leading-relaxed">
+              إذا رغبت في أن يخرج الإيميل حرفياً ومباشرة من حساب Google الخاص بكل موظف على نطاق الشركة (<span className="font-mono text-white">@dakahlia.net</span>):
+            </p>
+            <ol className="space-y-1 text-blue-200 list-decimal list-inside">
+              <li>افتح مشروع <strong>Apps Script</strong> واضغط <strong>Deploy ➔ Manage Deployments</strong>.</li>
+              <li>اضغط أيقونة القلم ✏️ (تعديل).</li>
+              <li>في خانة <strong>Execute as</strong> اختر: <strong className="text-white bg-blue-800/80 px-1 rounded">User accessing the web app</strong> (المستخدم الذي يفتح التطبيق).</li>
+              <li>في خانة <strong>Who has access</strong> اختر: <strong className="text-white bg-blue-800/80 px-1 rounded">Anyone within dakahlia.net</strong>.</li>
+              <li>اضغط <strong>Deploy</strong>.</li>
+            </ol>
+          </div>
         </div>
       </div>
 

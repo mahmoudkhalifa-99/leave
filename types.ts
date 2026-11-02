@@ -20,6 +20,7 @@ export interface Employee {
   name: string;
   dept: string;
   title: string;
+  email?: string;
   annualBalance?: number;
 }
 

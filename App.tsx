@@ -5,6 +5,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { SetupGuide } from './components/SetupGuide';
 import { RequestDetails } from './components/RequestDetails';
 import { AccountModal } from './components/AccountModal';
+import { EmployeeSyncModal } from './components/EmployeeSyncModal';
 import { submitLeaveRequest, fetchEmployeesFromSheet, getInitialSubmitterEmail, setStoredSubmitterEmail, detectActiveGoogleUser } from './services/gasService';
 import { LeaveRequest, RequestStatus, Employee } from './types';
 import { DAKAHLIA_LOGO_BASE64, DAKAHLIA_LOGO_PATH } from './services/logoData';
@@ -22,6 +23,9 @@ const App: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isSyncingEmployees, setIsSyncingEmployees] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [syncSource, setSyncSource] = useState<string>('');
+  const [isSyncFallback, setIsSyncFallback] = useState<boolean>(false);
+  const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
   
   // قراءة إيميل حساب Google النشط في المتصفح تلقائياً (مثل Google Forms)
   const initialEmail = getInitialSubmitterEmail();
@@ -50,6 +54,8 @@ const App: React.FC = () => {
       const res = await fetchEmployeesFromSheet();
       if (res.success && res.employees.length > 0) {
         setEmployees(res.employees);
+        setSyncSource(res.source);
+        setIsSyncFallback(Boolean(res.isFallback));
         setLastSyncTime(new Date());
         if (res.activeUser && res.activeUser !== ADMIN_EMAIL && !submitterEmail) {
           setSubmitterEmail(res.activeUser);
@@ -99,7 +105,13 @@ const App: React.FC = () => {
     setMessage(null);
 
     const requestId = 'FHR-W-' + Math.floor(100000 + Math.random() * 900000);
-    const finalData = { ...data, requestId, submitterEmail: submitterEmail || '' };
+    const empEmail = (data.employeeEmail || submitterEmail || '').trim().toLowerCase();
+    const finalData = { 
+      ...data, 
+      requestId, 
+      employeeEmail: empEmail,
+      submitterEmail: submitterEmail || empEmail 
+    };
 
     const result = await submitLeaveRequest(finalData);
 
@@ -107,10 +119,11 @@ const App: React.FC = () => {
       const newRequest: LeaveRequest = {
         ...data,
         id: requestId,
+        employeeEmail: empEmail,
         status: RequestStatus.PENDING_MANAGER,
         createdAt: new Date().toISOString(),
         displayIssueDate: data.displayIssueDate,
-        submitterEmail: submitterEmail || 'مسجل بحساب Google في المتصفح',
+        submitterEmail: submitterEmail || empEmail,
         signatures: {}
       };
       
@@ -119,7 +132,7 @@ const App: React.FC = () => {
       setIsSubmitting(false);
       setMessage({ 
         type: 'success', 
-        text: `تم إرسال الطلب ${requestId} بنجاح! تم توثيق حساب Google وتوجيه الطلب للمدير المباشر.` 
+        text: `تم إرسال الطلب ${requestId} بنجاح! تم توجيه البريد للمدير باسم الموظف (${data.employeeName || empEmail}).` 
       });
       setActiveTab('dashboard');
     } else {
@@ -236,6 +249,9 @@ const App: React.FC = () => {
               onRefreshEmployees={syncEmployees}
               lastSyncTime={lastSyncTime}
               submitterEmail={submitterEmail}
+              syncSource={syncSource}
+              isSyncFallback={isSyncFallback}
+              onOpenSyncModal={() => setShowSyncModal(true)}
               onOpenAccountModal={() => setShowAccountModal(true)}
               onAccountSelected={handleUpdateSubmitterEmail}
               onSubmit={handleSubmit} 
@@ -334,6 +350,23 @@ const App: React.FC = () => {
         }}
         onSave={handleUpdateSubmitterEmail}
         onClear={handleClearSubmitterEmail}
+      />
+
+      <EmployeeSyncModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        employees={employees}
+        syncSource={syncSource}
+        onEmployeesUpdated={(newEmps, source) => {
+          setEmployees(newEmps);
+          setSyncSource(source);
+          setIsSyncFallback(source === 'seed');
+          setLastSyncTime(new Date());
+          setMessage({
+            type: 'success',
+            text: `تم تحديث قائمة الموظفين بنجاح! تم تحميل ${newEmps.length} موظف من كافة الصفوف.`
+          });
+        }}
       />
     </div>
   );

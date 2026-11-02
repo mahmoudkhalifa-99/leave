@@ -139,6 +139,13 @@ function formatSimpleDate(val) {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
+
+    // فحص طلب مزامنة كافة الموظفين عبر POST
+    if (data && data.action === 'getEmployees') {
+      return ContentService.createTextOutput(JSON.stringify(getEmployeesData()))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const requestId = data.requestId || 'REQ' + new Date().getTime();
     
     const deptInfo = CONFIG.DEPARTMENTS[data.department] || CONFIG.DEPARTMENTS["إدارة المخازن"];
@@ -160,6 +167,7 @@ function doPost(e) {
     } catch (e) {}
     // تنبيه حاسم: لا نستخدم مطلقاً Session.getEffectiveUser() لأنها ترجع إيميل المطور/المشرف لكل الزائرين
     const submitterEmail = browserEmail || data.submitterEmail || '';
+    const employeeEmail = String(data.employeeEmail || submitterEmail || '').trim();
 
     sheet.appendRow([
       requestId, 
@@ -174,7 +182,7 @@ function doPost(e) {
       data.daysCount, 
       'PENDING_MANAGER', 
       data.reason || '', 
-      data.employeeEmail || '', 
+      employeeEmail, 
       JSON.stringify([]),
       submitterEmail
     ]);
@@ -190,10 +198,11 @@ function doPost(e) {
       endDate: endDate,
       reason: String(data.reason || 'لا يوجد'),
       today: today,
+      employeeEmail: employeeEmail,
       submitterEmail: submitterEmail
     };
 
-    const isDirector = isWarehouseDirectorRequest(data);
+    const isDirector = isWarehouseDirectorRequest(empDataForPdf);
     let targetManagerEmail = deptInfo.managerEmail;
     let targetRole = 'المدير المباشر';
 
@@ -216,20 +225,29 @@ function doPost(e) {
   }
 }
 
+/**
+ * معالجة طلبات GET
+ */
 function doGet(e) {
-  // فحص استعلام المستخدم النشط أو مزامنة الموظفين
+  // 1. مزامنة وسحب كافة صفوف الموظفين من الشيت (تبويب data)
+  if (e && e.parameter && e.parameter.action === 'getEmployees') {
+    return ContentService.createTextOutput(JSON.stringify(getEmployeesData()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 2. فحص استعلام المستخدم النشط لجلسة المتصفح
   if (e && e.parameter && e.parameter.action === 'getActiveUser') {
     var activeEmail = '';
     try {
       activeEmail = Session.getActiveUser().getEmail();
     } catch (e) {}
-    // لا نضع إيميل المشرف/الناشر مطلقاً كبديل
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
       email: activeEmail || ''
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
+  // 3. دورة الموافقات والاعتمادات
   const id = e && e.parameter ? e.parameter.id : null;
   const action = e && e.parameter ? e.parameter.action : null;
   const role = e && e.parameter ? e.parameter.role : null;
@@ -244,6 +262,195 @@ function doGet(e) {
     `);
   } catch (err) {
     return HtmlService.createHtmlOutput(`<div dir="rtl"><h1>خطأ: ${err.toString()}</h1></div>`);
+  }
+}
+
+/**
+ * دالة قراءة وسحب كافة صفوف الموظفين من تبويب data في شيت Google بلا أي حد أقصى
+ */
+function getEmployeesData() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      try {
+        ss = SpreadsheetApp.openById('1n2sp5TNNGL3M5_LRNJ7IMLXXWoH6-kL8r4eGZokISCs');
+      } catch (errOpen) {
+        console.error("openById error: " + errOpen.toString());
+      }
+    }
+    if (!ss) {
+      return { success: false, error: "تعذر فتح ملف Google Sheets" };
+    }
+
+    // البحث عن تبويب البيانات (افتراضياً data)
+    var sheet = ss.getSheetByName('data') || 
+                ss.getSheetByName('Data') || 
+                ss.getSheetByName('DATA') || 
+                ss.getSheetByName('الموظفين') || 
+                ss.getSheetByName('بيانات الموظفين') || 
+                ss.getSheetByName('تصريح اجازات') || 
+                ss.getSheets()[0];
+
+    if (!sheet) {
+      return { success: false, error: "لم يتم العثور على تبويب data في الشيت" };
+    }
+
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) {
+      return { success: true, employees: [], count: 0, totalRows: lastRow };
+    }
+
+    var maxCols = Math.max(lastCol, 10);
+    // قراءة كل الصفوف بالكامل من الصف 1 حتى آخر صف مسجل
+    var range = sheet.getRange(1, 1, lastRow, maxCols);
+    var values = range.getValues();
+    if (!values || values.length <= 1) {
+      return { success: true, employees: [], count: 0, totalRows: lastRow };
+    }
+
+    var headerRow = values[0];
+    var codeCol = -1;
+    var nameCol = -1;
+    var deptCol = -1;
+    var titleCol = -1;
+    var balanceCol = -1;
+    var emailCol = -1;
+
+    // استكشاف ترتيب الأعمدة تلقائياً من صف العناوين
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = String(headerRow[c] || '').trim().toLowerCase();
+      if (!h) continue;
+      if (codeCol === -1 && (h.indexOf('كود') > -1 || h.indexOf('code') > -1)) {
+        codeCol = c;
+      } else if (nameCol === -1 && (h.indexOf('اسم') > -1 || h.indexOf('name') > -1)) {
+        nameCol = c;
+      } else if (deptCol === -1 && (h.indexOf('قسم') > -1 || h.indexOf('إدارة') > -1 || h.indexOf('ادارة') > -1 || h.indexOf('dept') > -1)) {
+        deptCol = c;
+      } else if (titleCol === -1 && (h.indexOf('وظيفة') > -1 || h.indexOf('الوظيفة') > -1 || h.indexOf('title') > -1 || h.indexOf('job') > -1 || h.indexOf('مهنة') > -1)) {
+        titleCol = c;
+      } else if (balanceCol === -1 && (h.indexOf('رصيد') > -1 || h.indexOf('balance') > -1)) {
+        balanceCol = c;
+      } else if (emailCol === -1 && (h.indexOf('بريد') > -1 || h.indexOf('ايميل') > -1 || h.indexOf('email') > -1 || h.indexOf('mail') > -1)) {
+        emailCol = c;
+      }
+    }
+
+    // إذا لم تُكتشف العناوين صراحة، نتحقق من نمط الصفوف الأولى
+    var startRow = 1;
+    if (codeCol === -1 || nameCol === -1) {
+      var col0Numeric = 0;
+      var col1Numeric = 0;
+      var sampleLimit = Math.min(values.length, 15);
+
+      for (var s = 1; s < sampleLimit; s++) {
+        var v0 = String(values[s][0] || '').trim();
+        var v1 = String(values[s][1] || '').trim();
+        if (v0 && !isNaN(Number(v0)) && v0.length >= 3) col0Numeric++;
+        if (v1 && !isNaN(Number(v1)) && v1.length >= 3) col1Numeric++;
+      }
+
+      if (col1Numeric >= col0Numeric && col1Numeric > 0) {
+        // نمط وجود عمود مسلسل A: عمود 0=م، عمود 1=كود، عمود 2=اسم، عمود 3=قسم، عمود 4=رصيد، عمود 5=وظيفة
+        codeCol = 1;
+        nameCol = 2;
+        deptCol = 3;
+        balanceCol = 4;
+        titleCol = 5;
+        emailCol = 6;
+      } else {
+        // نمط البدء مباشرة: عمود 0=كود، عمود 1=اسم، عمود 2=قسم، عمود 3=وظيفة، عمود 4=رصيد
+        codeCol = 0;
+        nameCol = 1;
+        deptCol = 2;
+        titleCol = 3;
+        balanceCol = 4;
+        emailCol = 5;
+      }
+    }
+
+    var employees = [];
+    var seenCodes = {};
+
+    for (var r = startRow; r < values.length; r++) {
+      var row = values[r];
+      if (!row || row.length === 0) continue;
+
+      var rawCode = row[codeCol] !== undefined && row[codeCol] !== null ? String(row[codeCol]).trim() : '';
+      var rawName = row[nameCol] !== undefined && row[nameCol] !== null ? String(row[nameCol]).trim() : '';
+
+      // تخطي الصفوف الفارغة أو صفوف العناوين المكررة
+      if (!rawName || rawName === 'الاسم' || rawName === 'اسم الموظف' || rawCode === 'كود' || rawCode === 'الكود') {
+        // محاولة في حال كان الاسم في العمود 1 والكود في العمود 0
+        if (!rawName && row[1] && isNaN(Number(row[1])) && String(row[1]).length > 2) {
+          rawName = String(row[1]).trim();
+          rawCode = String(row[0] || '').trim();
+        }
+        if (!rawName) continue;
+      }
+
+      var code = rawCode || ('EMP' + (r + 1));
+      if (seenCodes[code]) {
+        code = code + '_' + (r + 1);
+      }
+      seenCodes[code] = true;
+
+      var dept = deptCol !== -1 && row[deptCol] !== undefined && row[deptCol] !== null ? String(row[deptCol]).trim() : 'إدارة المخازن';
+      var title = titleCol !== -1 && row[titleCol] !== undefined && row[titleCol] !== null ? String(row[titleCol]).trim() : '';
+      
+      var rawBal = balanceCol !== -1 ? row[balanceCol] : null;
+      var balance = 0;
+      if (rawBal !== null && rawBal !== undefined && rawBal !== '') {
+        var num = Number(rawBal);
+        if (!isNaN(num)) balance = num;
+      }
+
+      // استخراج الإيميل
+      var email = '';
+      if (emailCol !== -1 && row[emailCol] && String(row[emailCol]).indexOf('@') > -1) {
+        email = String(row[emailCol]).trim().toLowerCase();
+      } else {
+        for (var k = 0; k < row.length; k++) {
+          var cellVal = String(row[k] || '').trim();
+          if (cellVal.indexOf('@') > -1) {
+            email = cellVal.toLowerCase();
+            break;
+          }
+        }
+      }
+
+      if (!email) {
+        email = (code === '70335') ? 'ahmed.hamdan@dakahlia.net' : ('emp.' + code + '@dakahlia.net');
+      }
+
+      employees.push({
+        code: code,
+        name: rawName,
+        dept: dept || 'إدارة المخازن',
+        title: title || '',
+        annualBalance: balance,
+        email: email
+      });
+    }
+
+    var activeUser = '';
+    try {
+      activeUser = Session.getActiveUser().getEmail();
+    } catch (e) {}
+
+    return {
+      success: true,
+      employees: employees,
+      count: employees.length,
+      totalRowsScanned: values.length - startRow,
+      sheetName: sheet.getName(),
+      activeUser: activeUser
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.toString()
+    };
   }
 }
 
@@ -456,6 +663,10 @@ function sendApprovalMail(targetEmail, role, id, data, pdfBlob) {
     </div>
   ` : '';
 
+  // البريد الإلكتروني للموظف صاحب الإجازة لإرسال الإيميل باسمه وتوجيه الردود إليه
+  const empEmail = (data.employeeEmail || data.submitterEmail || '').trim();
+  const empName = (data.employeeName || 'موظف').trim();
+
   const htmlBody = `
     <div dir="rtl" style="font-family: Arial, sans-serif; border: 1px solid #e5e7eb; padding: 25px; border-radius: 15px; max-width: 600px; margin: auto;">
       <h2 style="color: #1e3a8a; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">طلب إجازة للمراجعة - ${role}</h2>
@@ -464,10 +675,12 @@ function sendApprovalMail(targetEmail, role, id, data, pdfBlob) {
       <p>يرجى مراجعة طلب الإجازة المقدم من الموظف التالي:</p>
       <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
         <tr><td style="padding: 5px; color: #666;">اسم الموظف:</td><td style="font-weight: bold;">${data.employeeName}</td></tr>
+        ${data.employeeCode ? `<tr><td style="padding: 5px; color: #666;">كود الموظف:</td><td style="font-weight: bold;">${data.employeeCode}</td></tr>` : ''}
         <tr><td style="padding: 5px; color: #666;">الوظيفة والقسم:</td><td style="font-weight: bold;">${data.jobTitle} - ${data.department}</td></tr>
         <tr><td style="padding: 5px; color: #666;">نوع الإجازة:</td><td style="color: #f59e0b; font-weight: bold;">${data.leaveType}</td></tr>
         <tr><td style="padding: 5px; color: #666;">التاريخ:</td><td style="font-weight: bold;">من ${data.startDate} إلى ${data.endDate} (${data.daysCount} أيام)</td></tr>
-        <tr><td style="padding: 5px; color: #666;">حساب منشئ الطلب:</td><td style="font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${data.submitterEmail || 'غير محدد'}</td></tr>
+        <tr><td style="padding: 5px; color: #666;">البريد الإلكتروني للموظف:</td><td style="font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${empEmail || 'غير محدد'}</td></tr>
+        ${data.submitterEmail && data.submitterEmail !== empEmail ? `<tr><td style="padding: 5px; color: #666;">حساب منشئ الطلب:</td><td style="font-family: monospace;" dir="ltr">${data.submitterEmail}</td></tr>` : ''}
       </table>
       <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
         <a href="${approveUrl}" style="background: #166534; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-left: 10px;">اعتماد الطلب</a>
@@ -476,8 +689,25 @@ function sendApprovalMail(targetEmail, role, id, data, pdfBlob) {
     </div>
   `;
 
-  GmailApp.sendEmail(recipients, `مراجعة طلب إجازة: ${data.employeeName} (${id})`, "", {
+  const emailSubject = `مراجعة طلب إجازة: ${empName} (${id})`;
+  const emailOptions = {
     htmlBody: htmlBody,
-    attachments: [pdfBlob]
-  });
+    attachments: [pdfBlob],
+    name: empName, // يظهر اسم الموظف صاحب الإجازة كمرسل للرسالة
+    replyTo: empEmail || undefined // أي رد من المدير يذهب مباشرة لبريد الموظف صاحب الإجازة
+  };
+
+  // محاولة الإرسال بعنوان بريد الموظف مباشرة في حال وجود صلاحية Send-As أو اسم مستعار
+  if (empEmail) {
+    try {
+      const aliases = GmailApp.getAliases();
+      if (aliases && aliases.indexOf(empEmail) !== -1) {
+        emailOptions.from = empEmail;
+      }
+    } catch (aliasErr) {
+      console.warn("Could not check aliases:", aliasErr);
+    }
+  }
+
+  GmailApp.sendEmail(recipients, emailSubject, "", emailOptions);
 }
