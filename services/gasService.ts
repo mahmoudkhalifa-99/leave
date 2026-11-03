@@ -3,7 +3,7 @@ import { LeaveRequest, Employee } from '../types';
 /**
  * إعدادات الاتصال بـ Google Apps Script و Google Sheets
  */
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbx1eVkWgYu7rxGmJwCPCmPgjVCGEHUFU6VFKFGK89V_YFwH81RKPo2HjMi98aF4_2iPXw/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJ-c7z8yHi3yMnjHBOJJgGqF2CBiUc0ar9ADnv0E9GzRdOhxnQVyKJhxggPrMXVMQVTw/exec';
 export const SPREADSHEET_ID = '1n2sp5TNNGL3M5_LRNJ7IMLXXWoH6-kL8r4eGZokISCs';
 export const SHEET_DATA_TAB = 'data';
 
@@ -370,6 +370,11 @@ export const fetchEmployeesFromSheet = async (): Promise<{
             titleCol = 4;
             emailCol = 5;
           }
+
+          // الرصيد من عمود "المتبقي من رصيد الإجازات" (العمود L) إذا وُجد عنوانه
+          const colLabels: string[] = (json.table?.cols || []).map((c: any) => String(c?.label || ''));
+          const remainingIdx = colLabels.findIndex(l => l.includes('المتبقي'));
+          if (remainingIdx !== -1) balCol = remainingIdx;
 
           const parsedEmployees: Employee[] = [];
           for (let i = 0; i < rows.length; i++) {

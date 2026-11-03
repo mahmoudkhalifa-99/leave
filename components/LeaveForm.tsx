@@ -403,7 +403,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
                 formData.annualBalance > 0 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-700'
               }`}>
                 <i className="fas fa-wallet text-[10px]"></i>
-                الرصيد السنوي للشيت: <strong className="font-mono">{formData.annualBalance}</strong> يوم
+                الرصيد المتبقي للشيت: <strong className="font-mono">{formData.annualBalance}</strong> يوم
               </span>
             )}
           </div>
@@ -478,7 +478,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
           {isExceedingBalance && (
             <div className="text-[11px] text-red-600 font-bold mt-1.5 flex items-center gap-1 bg-red-50 p-2 rounded-lg border border-red-200">
               <i className="fas fa-exclamation-triangle"></i>
-              <span>الأيام المطلوبة ({formData.daysCount}) تتجاوز الرصيد السنوي ({formData.annualBalance})</span>
+              <span>الأيام المطلوبة ({formData.daysCount}) تتجاوز الرصيد المتبقي ({formData.annualBalance})</span>
             </div>
           )}
         </div>

@@ -372,14 +372,23 @@ function getEmployeesData() {
       return { success: false, error: "تعذر فتح ملف Google Sheets" };
     }
 
-    // البحث عن تبويب البيانات (افتراضياً data)
-    var sheet = ss.getSheetByName('data') || 
-                ss.getSheetByName('Data') || 
-                ss.getSheetByName('DATA') || 
-                ss.getSheetByName('الموظفين') || 
-                ss.getSheetByName('بيانات الموظفين') || 
-                ss.getSheetByName('تصريح اجازات') || 
-                ss.getSheets()[0];
+    // البحث عن تبويب البيانات: نفضّل التبويب الذي يحتوي عمود "المتبقي من رصيد الإجازات" (العمود L)
+    var candidateNames = ['data', 'Data', 'DATA', 'Summary', 'summary', 'الموظفين', 'بيانات الموظفين', 'تصريح اجازات'];
+    var candidates = [];
+    for (var ci = 0; ci < candidateNames.length; ci++) {
+      var cs = ss.getSheetByName(candidateNames[ci]);
+      if (cs) candidates.push(cs);
+    }
+    var sheet = null;
+    for (var si = 0; si < candidates.length && !sheet; si++) {
+      var lc = candidates[si].getLastColumn();
+      if (lc < 1) continue;
+      var hdr = candidates[si].getRange(1, 1, 1, lc).getValues()[0];
+      for (var hi = 0; hi < hdr.length; hi++) {
+        if (String(hdr[hi] || '').indexOf('المتبقي') > -1) { sheet = candidates[si]; break; }
+      }
+    }
+    if (!sheet) sheet = candidates[0] || ss.getSheets()[0];
 
     if (!sheet) {
       return { success: false, error: "لم يتم العثور على تبويب data في الشيت" };
@@ -426,6 +435,16 @@ function getEmployeesData() {
         emailCol = c;
       }
     }
+
+    // الرصيد المعتمد = "المتبقي من رصيد الإجازات" (العمود L). إن لم يوجد العنوان نستخدم العمود L إذا كان عنوانه يخص الرصيد.
+    var remainingCol = -1;
+    for (var rc = 0; rc < headerRow.length; rc++) {
+      if (String(headerRow[rc] || '').indexOf('المتبقي') > -1) { remainingCol = rc; break; }
+    }
+    if (remainingCol === -1 && headerRow.length > 11 && String(headerRow[11] || '').indexOf('رصيد') > -1) {
+      remainingCol = 11;
+    }
+    if (remainingCol !== -1) balanceCol = remainingCol;
 
     // إذا لم تُكتشف العناوين صراحة، نتحقق من نمط الصفوف الأولى
     var startRow = 1;
