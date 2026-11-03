@@ -3,7 +3,7 @@ import { LeaveRequest, Employee } from '../types';
 /**
  * إعدادات الاتصال بـ Google Apps Script و Google Sheets
  */
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycby9QXtVwBlz4ZfrXIyq8P3iL9BxrwQMk9aVPSErdU3VvJ80NGXzUSbW-GXmq2A4ziSDNA/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwjhLuiKGDZz0D8AD0Rv9PH3HUI_Ly43kEkg0AH8-DBJXJnryPdXq3kOu2x9jxF_IQLmg/exec';
 export const SPREADSHEET_ID = '1n2sp5TNNGL3M5_LRNJ7IMLXXWoH6-kL8r4eGZokISCs';
 export const SHEET_DATA_TAB = 'data';
 
