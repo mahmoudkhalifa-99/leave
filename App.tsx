@@ -1,16 +1,38 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LeaveForm } from './components/LeaveForm';
 import { StatusBadge } from './components/StatusBadge';
 import { SetupGuide } from './components/SetupGuide';
 import { RequestDetails } from './components/RequestDetails';
 import { AccountModal } from './components/AccountModal';
 import { EmployeeSyncModal } from './components/EmployeeSyncModal';
-import { submitLeaveRequest, fetchEmployeesFromSheet, getInitialSubmitterEmail, setStoredSubmitterEmail, detectActiveGoogleUser } from './services/gasService';
+import { submitLeaveRequest, fetchEmployeesFromSheet, fetchRequestStatuses, getInitialSubmitterEmail, setStoredSubmitterEmail, detectActiveGoogleUser } from './services/gasService';
 import { LeaveRequest, RequestStatus, Employee } from './types';
 import { DAKAHLIA_LOGO_BASE64, DAKAHLIA_LOGO_PATH } from './services/logoData';
 
 const ADMIN_EMAIL = 'sadat.planning.officer@dakahlia.net';
+
+// تحويل رموز الحالة القادمة من الشيت إلى قيم RequestStatus المعروضة
+const mapSheetStatus = (code: string): RequestStatus | null => {
+  switch (code) {
+    case 'PENDING_MANAGER': return RequestStatus.PENDING_MANAGER;
+    case 'PENDING_DEPT_HEAD': return RequestStatus.PENDING_DEPT_HEAD;
+    case 'PENDING_HR': return RequestStatus.PENDING_HR;
+    case 'APPROVED': return RequestStatus.APPROVED;
+    case 'REJECTED': return RequestStatus.REJECTED;
+    default: return null;
+  }
+};
+
+// تحويل مصفوفة التوقيعات القادمة من الشيت إلى كائن signatures
+const mapSignatures = (sigs: string[] = []): LeaveRequest['signatures'] => {
+  const stamp = 'APPROVED';
+  return {
+    manager: sigs.includes('MANAGER') ? stamp : undefined,
+    deptHead: sigs.includes('DEPT_HEAD') ? stamp : undefined,
+    hr: sigs.includes('HR') ? stamp : undefined
+  };
+};
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'form' | 'dashboard' | 'setup'>('form');
@@ -48,6 +70,12 @@ const App: React.FC = () => {
     setShowAccountModal(true);
   };
 
+  // نحتفظ بأحدث بريد في ref حتى لا تُعاد المزامنة وتحميل الطلبات في كل مرة يتغير فيها البريد
+  const submitterEmailRef = useRef(submitterEmail);
+  useEffect(() => {
+    submitterEmailRef.current = submitterEmail;
+  }, [submitterEmail]);
+
   const syncEmployees = useCallback(async () => {
     setIsSyncingEmployees(true);
     try {
@@ -57,9 +85,11 @@ const App: React.FC = () => {
         setSyncSource(res.source);
         setIsSyncFallback(Boolean(res.isFallback));
         setLastSyncTime(new Date());
-        if (res.activeUser && res.activeUser !== ADMIN_EMAIL && !submitterEmail) {
-          setSubmitterEmail(res.activeUser);
-          setStoredSubmitterEmail(res.activeUser);
+        if (res.activeUser && res.activeUser.toLowerCase() !== ADMIN_EMAIL.toLowerCase() && !submitterEmailRef.current) {
+          const detected = res.activeUser.trim().toLowerCase();
+          setSubmitterEmail(detected);
+          setStoredSubmitterEmail(detected);
+          setShowAccountModal(false);
         }
       }
     } catch (err) {
@@ -67,8 +97,9 @@ const App: React.FC = () => {
     } finally {
       setIsSyncingEmployees(false);
     }
-  }, [submitterEmail]);
+  }, []);
 
+  // تحميل الطلبات المحفوظة مرة واحدة فقط عند بدء التطبيق
   useEffect(() => {
     const saved = localStorage.getItem('leave_requests_warehouse');
     if (saved) {
@@ -78,16 +109,54 @@ const App: React.FC = () => {
         console.error('Failed to parse submissions', e);
       }
     }
-    // كشف حساب Google المفتوح في المتصفح تلقائياً في الخلفية (مثل Google Forms)
+  }, []);
+
+  // كشف حساب Google وتحميل الموظفين مرة واحدة عند البدء
+  useEffect(() => {
+    // الكشف التلقائي لا يغيّر الحساب إذا كان المستخدم قد حدده بالفعل
     detectActiveGoogleUser().then(detected => {
-      if (detected) {
+      if (detected && !submitterEmailRef.current) {
         setSubmitterEmail(detected);
+        setShowAccountModal(false);
       }
     });
-
-    // مزامنة الموظفين من الشيت عند بدء التطبيق
     syncEmployees();
   }, [syncEmployees]);
+
+  const submissionsRef = useRef<LeaveRequest[]>([]);
+  useEffect(() => {
+    submissionsRef.current = submissions;
+  }, [submissions]);
+
+  // تحديث حالة الطلبات المعلّقة من الشيت
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+  const refreshStatuses = useCallback(async () => {
+    const pending = submissionsRef.current.filter(r => r.id && r.status !== RequestStatus.APPROVED && r.status !== RequestStatus.REJECTED);
+    if (pending.length === 0) return;
+    setIsRefreshingStatus(true);
+    try {
+      const map = await fetchRequestStatuses(pending.map(r => r.id as string));
+      if (Object.keys(map).length === 0) return;
+      const updated = submissionsRef.current.map(r => {
+        const info = r.id ? map[r.id] : undefined;
+        const mapped = info ? mapSheetStatus(info.status) : null;
+        if (!info || !mapped) return r;
+        return { ...r, status: mapped, signatures: mapSignatures(info.signatures) };
+      });
+      submissionsRef.current = updated;
+      setSubmissions(updated);
+      localStorage.setItem('leave_requests_warehouse', JSON.stringify(updated));
+    } finally {
+      setIsRefreshingStatus(false);
+    }
+  }, []);
+
+  // عند فتح سجل الطلبات نحدّث الحالات من الشيت
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      refreshStatuses();
+    }
+  }, [activeTab, refreshStatuses]);
 
   const saveSubmissions = (newSubs: LeaveRequest[]) => {
     setSubmissions(newSubs);
@@ -108,6 +177,7 @@ const App: React.FC = () => {
     const empEmail = (data.employeeEmail || submitterEmail || '').trim().toLowerCase();
     const finalData = { 
       ...data, 
+      daysCount: Number(data.daysCount),
       requestId, 
       employeeEmail: empEmail,
       submitterEmail: submitterEmail || empEmail 
@@ -118,6 +188,7 @@ const App: React.FC = () => {
     if (result.success) {
       const newRequest: LeaveRequest = {
         ...data,
+        daysCount: Number(data.daysCount),
         id: requestId,
         employeeEmail: empEmail,
         status: RequestStatus.PENDING_MANAGER,
@@ -270,6 +341,17 @@ const App: React.FC = () => {
                   </p>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={refreshStatuses}
+                  disabled={isRefreshingStatus}
+                  className="px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-xs font-bold hover:bg-gray-50 transition-all flex items-center gap-2 self-start disabled:opacity-50"
+                  title="تحديث حالة الطلبات من الشيت"
+                >
+                  <i className={`fas fa-sync-alt ${isRefreshingStatus ? 'fa-spin' : ''}`}></i>
+                  <span>{isRefreshingStatus ? 'جاري التحديث...' : 'تحديث الحالات'}</span>
+                </button>
+
                 {/* صلاحية خاصة للمسؤول للتبديل بين طلباته الخاصة وكافة الطلبات */}
                 {isAdmin && (
                   <button
@@ -316,7 +398,7 @@ const App: React.FC = () => {
                           </td>
                           <td className="py-4 px-6">
                             <div className="text-sm font-bold">{req.leaveType}</div>
-                            <div className="text-xs text-gray-500">{req.daysCount} أيام ({req.startDate})</div>
+                            <div className="text-xs text-gray-500">{req.daysCount} أيام ({req.displayStartDate || req.startDate})</div>
                           </td>
                           <td className="py-4 px-6"><StatusBadge status={req.status} /></td>
                           <td className="py-4 px-6 text-center">

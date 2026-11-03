@@ -55,12 +55,9 @@ export const getInitialSubmitterEmail = (): string => {
   if (typeof localStorage !== 'undefined') {
     const saved = localStorage.getItem('active_google_user_email');
     if (saved && saved.trim()) {
-      const clean = saved.trim().toLowerCase();
-      if (clean === 'sadat.planning.officer@dakahlia.net') {
-        localStorage.removeItem('active_google_user_email');
-        return '';
-      }
-      return clean;
+      // البريد المحفوظ يدوياً (حتى بريد المسؤول) يبقى بعد إعادة تحميل الصفحة؛
+      // الاستبعاد التلقائي لبريد المطوّر يتم فقط عند الكشف التلقائي من الخادم.
+      return saved.trim().toLowerCase();
     }
   }
 
@@ -171,7 +168,7 @@ export const parsePastedSheetData = (rawText: string): Employee[] => {
     // تخمين تلقائي: هل أول صف عناوين؟
     const sample0 = rows[0][0] || '';
     const sample1 = rows[0][1] || '';
-    const isHeader = isNaN(Number(sample0)) && (sample0.includes('كود') || sample0.includes('اسم') || sample0.includes('م') || sample1.includes('اسم'));
+    const isHeader = isNaN(Number(sample0)) && (sample0.includes('كود') || sample0.includes('اسم') || sample0.trim() === 'م' || sample1.includes('اسم') || sample1.includes('كود'));
     startRow = isHeader ? 1 : 0;
 
     // نمط 1: عمود 0 مسلسل، عمود 1 كود، عمود 2 اسم، عمود 3 قسم، عمود 4 رصيد، عمود 5 وظيفة
@@ -493,5 +490,29 @@ export const submitLeaveRequest = async (request: any): Promise<{ success: boole
       success: false,
       error: 'فشل في الاتصال بخوادم جوجل. تأكد من صحة الرابط المنشور في ملف gasService.ts'
     };
+  }
+};
+
+/**
+ * جلب حالة وتوقيعات الطلبات من الشيت لتحديث "سجل طلباتي"
+ * (الحالة تتغير في الخادم عند اعتماد/رفض المديرين، بينما النسخة المحلية كانت تبقى دائماً "في انتظار المدير المباشر")
+ */
+export const fetchRequestStatuses = async (
+  ids: string[]
+): Promise<Record<string, { status: string; signatures: string[] }>> => {
+  const cleanIds = ids.filter(Boolean).slice(0, 100);
+  if (cleanIds.length === 0) return {};
+  try {
+    const url = `${DEFAULT_GAS_URL}?action=getStatuses&ids=${encodeURIComponent(cleanIds.join(','))}&t=${Date.now()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) return {};
+    const json = await res.json();
+    return json && json.success && json.statuses ? json.statuses : {};
+  } catch (err) {
+    console.warn('Status refresh failed (silent):', err);
+    return {};
   }
 };

@@ -45,7 +45,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
     department: '', 
     leaveType: LeaveType.ANNUAL,
     startDate: '',
-    daysCount: 1,
+    daysCount: 1 as number | string,
     endDate: '',
     reason: '',
     annualBalance: 0
@@ -73,7 +73,8 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
         department: emp.dept,
         jobTitle: emp.title || prev.jobTitle || 'موظف',
         annualBalance: emp.annualBalance !== undefined ? emp.annualBalance : 0,
-        employeeEmail: prev.employeeEmail && prev.employeeEmail.trim() ? prev.employeeEmail : defaultEmpEmail
+        // عند اختيار موظف آخر يجب أن يتغير البريد لبريده هو (كان يبقى بريد مقدم الطلب/الموظف السابق)
+        employeeEmail: emp.email || defaultEmpEmail
       }));
     } else {
       setFormData(prev => ({ ...prev, [key === 'code' ? 'employeeCode' : 'employeeName']: value }));
@@ -87,15 +88,18 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
   }, [submitterEmail]);
 
   useEffect(() => {
-    if (formData.startDate && formData.daysCount > 0) {
-      const start = new Date(formData.startDate);
-      const end = new Date(start);
-      end.setDate(start.getDate() + (Number(formData.daysCount) - 1));
-      
+    const days = Number(formData.daysCount);
+    if (formData.startDate && days > 0) {
+      // نبني التاريخ من مكوناته المحلية (new Date('YYYY-MM-DD') يُفسَّر UTC وقد يُزاح يوماً حسب المنطقة الزمنية)
+      const [sy, sm, sd] = formData.startDate.split('-').map(Number);
+      const end = new Date(sy, sm - 1, sd + (Math.floor(days) - 1));
+
       const y = end.getFullYear();
       const m = String(end.getMonth() + 1).padStart(2, '0');
       const d = String(end.getDate()).padStart(2, '0');
       setFormData(prev => ({ ...prev, endDate: `${y}-${m}-${d}` }));
+    } else {
+      setFormData(prev => (prev.endDate ? { ...prev, endDate: '' } : prev));
     }
   }, [formData.startDate, formData.daysCount]);
 
@@ -103,14 +107,21 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
     const { name, value } = e.target;
     if (name === 'employeeCode') autoFillEmployee('code', value);
     else if (name === 'employeeName') autoFillEmployee('name', value);
+    else if (name === 'daysCount') setFormData(prev => ({ ...prev, daysCount: value === '' ? '' : Number(value) }));
     else setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const days = Number(formData.daysCount);
+    if (!Number.isInteger(days) || days < 1 || !formData.endDate) {
+      alert('يرجى إدخال تاريخ بداية صحيح وعدد أيام صحيح (رقم صحيح لا يقل عن 1).');
+      return;
+    }
     const effectiveEmail = (formData.employeeEmail || submitterEmail || '').trim();
     onSubmit({
       ...formData,
+      daysCount: days,
       employeeEmail: effectiveEmail,
       submitterEmail: submitterEmail ? submitterEmail.trim() : effectiveEmail,
       displayIssueDate: formatDateDisplay(formData.issueDate),
@@ -157,7 +168,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
     if (!code) return;
     const emp = employees.find(em => em.code === code);
     if (emp) {
-      setGateEmail(`emp.${emp.code}@dakahlia.net`);
+      setGateEmail(emp.email || `emp.${emp.code}@dakahlia.net`);
       setGateError('');
     }
   };
@@ -407,7 +418,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
           />
           <datalist id="names-list">
             {employees.map(emp => (
-              <option key={emp.name} value={emp.name}>
+              <option key={emp.code} value={emp.name}>
                 كود: {emp.code} - {emp.dept} {emp.annualBalance !== undefined ? `(رصيد: ${emp.annualBalance})` : ''}
               </option>
             ))}
@@ -472,7 +483,7 @@ export const LeaveForm: React.FC<LeaveFormProps> = ({
           )}
         </div>
         <div>
-          <label className={labelClasses}><i className="fas fa-calendar-check ml-2 text-green-500"></i> تاريخ العودة (تلقائي)</label>
+          <label className={labelClasses}><i className="fas fa-calendar-check ml-2 text-green-500"></i> آخر يوم في الإجازة (تلقائي)</label>
           <div className="w-full px-5 py-3 rounded-xl border-2 border-green-200 bg-white text-green-700 text-sm font-black flex items-center shadow-sm">
             {formatDateDisplay(formData.endDate) || 'يحدد عند اختيار البداية'}
           </div>

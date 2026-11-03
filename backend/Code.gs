@@ -15,6 +15,11 @@ const CONFIG = {
       managerEmail: "ahmed.hamdan@dakahlia.net",
       managerName: "أ/ رئيس قسم التخطيط و المتابعة"
     },
+    // الاسم كما يظهر في شيت الموظفين (تبويب data)
+    "التخطيط": {
+      managerEmail: "ahmed.hamdan@dakahlia.net",
+      managerName: "أ/ رئيس قسم التخطيط"
+    },
     "إدارة المخازن": {
       managerEmail: "ahmed.hamdan@dakahlia.net",
       managerName: "أ/ مدير إدارة المخازن"
@@ -90,23 +95,51 @@ function getHREmails() {
 
 /**
  * التحقق مما إذا كان الطلب يخص مدير المخازن (أ/ أحمد حمدان)
+ * المطابقة بالكود أو بالبريد فقط. لا نطابق بالاسم الجزئي أو بالمسمى الوظيفي
+ * لأن ذلك كان يوجّه طلبات موظفين آخرين (مثل مدير اللوجستيه أو أي اسم يحتوي "حمدان") إلى مسار الاستثناء بالخطأ.
  */
 function isWarehouseDirectorRequest(data) {
   if (!data) return false;
   const email = String(data.employeeEmail || data.submitterEmail || '').trim().toLowerCase();
-  const name = String(data.employeeName || '').trim();
   const code = String(data.employeeCode || '').trim();
-  const title = String(data.jobTitle || '').trim();
+  const exc = CONFIG.WAREHOUSE_DIRECTOR_EXCEPTION;
 
-  return (
-    email === 'ahmed.hamdan@dakahlia.net' ||
-    code === '70335' ||
-    name.indexOf('حمدان') > -1 ||
-    name.indexOf('احمد حمدان') > -1 ||
-    name.indexOf('أحمد حمدان') > -1 ||
-    (data.department === 'إدارة المخازن' && title.indexOf('مدير') > -1)
-  );
+  return email === exc.directorEmail.toLowerCase() || code === exc.directorCode;
 }
+
+/**
+ * بيانات القسم ومديره، مع قسم احتياطي إذا لم يُعرَّف القسم في CONFIG
+ */
+function getDeptInfo(department) {
+  return CONFIG.DEPARTMENTS[String(department || '').trim()] || CONFIG.DEPARTMENTS["إدارة المخازن"];
+}
+
+/**
+ * تهريب أي نص قادم من المستخدم قبل وضعه داخل رسائل HTML (منع حقن HTML في الإيميلات)
+ */
+function esc(val) {
+  return String(val === null || val === undefined ? '' : val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escObj(obj) {
+  const out = {};
+  Object.keys(obj || {}).forEach(function(k) { out[k] = esc(obj[k]); });
+  return out;
+}
+
+// حالات الطلب في الشيت والمرحلة المطلوبة لكل دور
+const STAGE_BY_ROLE = {
+  'المدير المباشر': 'PENDING_MANAGER',
+  'المدير العام (المشرف على مدير المخازن)': 'PENDING_MANAGER',
+  'مدير الإدارة': 'PENDING_DEPT_HEAD',
+  'مدير الإدارة (المشرف العام)': 'PENDING_DEPT_HEAD',
+  'الموارد البشرية': 'PENDING_HR'
+};
 
 /**
  * دالة مساعدة لتنسيق التاريخ ليظهر dd/mm/yyyy فقط
@@ -116,11 +149,11 @@ function formatSimpleDate(val) {
   try {
     // إذا كانت القيمة كائن تاريخ
     if (val instanceof Date) {
-      return Utilities.formatDate(val, "GMT+2", "dd/MM/yyyy");
+      return Utilities.formatDate(val, "Africa/Cairo", "dd/MM/yyyy");
     }
     // إذا كانت نصاً طويلاً ناتجاً عن تحويل تاريخ
     if (typeof val === 'string' && val.includes('GMT')) {
-      return Utilities.formatDate(new Date(val), "GMT+2", "dd/MM/yyyy");
+      return Utilities.formatDate(new Date(val), "Africa/Cairo", "dd/MM/yyyy");
     }
     // إذا كانت نصاً بتنسيق yyyy-mm-dd (من Frontend)
     if (typeof val === 'string' && val.includes('-') && val.split('-')[0].length === 4) {
@@ -146,14 +179,31 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // التحقق من البيانات الأساسية قبل أي كتابة أو إرسال
+    if (!data || !data.employeeName || !data.startDate || !data.endDate || !(Number(data.daysCount) > 0)) {
+      throw new Error('بيانات الطلب ناقصة (الاسم / تاريخ البداية / تاريخ النهاية / عدد الأيام).');
+    }
+
     const requestId = data.requestId || 'REQ' + new Date().getTime();
-    
-    const deptInfo = CONFIG.DEPARTMENTS[data.department] || CONFIG.DEPARTMENTS["إدارة المخازن"];
+
+    const deptInfo = getDeptInfo(data.department);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(CONFIG.SHEET_NAME) || ss.insertSheet(CONFIG.SHEET_NAME);
-    
+
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow(['ID', 'Date Created', 'Emp Code', 'Emp Name', 'Title', 'Dept', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason', 'Email', 'Signatures']);
+      // 15 عموداً: يجب أن تطابق عدد القيم المضافة في كل طلب (كان ينقص عنوان Submitter Email)
+      sheet.appendRow(['ID', 'Date Created', 'Emp Code', 'Emp Name', 'Title', 'Dept', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason', 'Email', 'Signatures', 'Submitter Email']);
+    }
+
+    // منع التكرار: إذا وصل نفس رقم الطلب مرتين (نقر مزدوج / إعادة محاولة) لا نكرر الصف ولا الإيميلات
+    if (sheet.getLastRow() > 1) {
+      const existingIds = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+      for (let i = 0; i < existingIds.length; i++) {
+        if (String(existingIds[i][0]) === String(requestId)) {
+          return ContentService.createTextOutput(JSON.stringify({ success: true, requestId: requestId, duplicate: true }))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+      }
     }
 
     const today = formatSimpleDate(data.issueDate || new Date());
@@ -169,23 +219,27 @@ function doPost(e) {
     const submitterEmail = browserEmail || data.submitterEmail || '';
     const employeeEmail = String(data.employeeEmail || submitterEmail || '').trim();
 
-    sheet.appendRow([
-      requestId, 
-      today, 
-      data.employeeCode, 
-      data.employeeName, 
-      data.jobTitle, 
-      data.department, 
-      data.leaveType, 
-      startDate, 
-      endDate, 
-      data.daysCount, 
-      'PENDING_MANAGER', 
-      data.reason || '', 
-      employeeEmail, 
+    // نكتب الصف كنص (@) حتى لا يحوّل Google Sheets التاريخ dd/MM/yyyy إلى تاريخ بصيغة المنطقة (فيُقلب اليوم والشهر)
+    const newRowIndex = sheet.getLastRow() + 1;
+    const rowRange = sheet.getRange(newRowIndex, 1, 1, 15);
+    rowRange.setNumberFormat('@');
+    rowRange.setValues([[
+      requestId,
+      today,
+      data.employeeCode,
+      data.employeeName,
+      data.jobTitle,
+      data.department,
+      data.leaveType,
+      startDate,
+      endDate,
+      data.daysCount,
+      'PENDING_MANAGER',
+      data.reason || '',
+      employeeEmail,
       JSON.stringify([]),
       submitterEmail
-    ]);
+    ]]);
     
     const empDataForPdf = {
       employeeName: String(data.employeeName),
@@ -214,7 +268,7 @@ function doPost(e) {
 
     let pdf = generateFinalPDF(requestId, empDataForPdf, []);
     sendApprovalMail(targetManagerEmail, targetRole, requestId, empDataForPdf, pdf);
-    
+
     return ContentService.createTextOutput(JSON.stringify({ success: true, requestId: requestId }))
       .setMimeType(ContentService.MimeType.JSON);
       
@@ -247,21 +301,57 @@ function doGet(e) {
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
-  // 3. دورة الموافقات والاعتمادات
+  // 3. حالات الطلبات (لتحديث سجل "طلباتي" في الواجهة): ?action=getStatuses&ids=ID1,ID2
+  if (e && e.parameter && e.parameter.action === 'getStatuses') {
+    return ContentService.createTextOutput(JSON.stringify(getRequestStatuses(e.parameter.ids)))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 4. دورة الموافقات والاعتمادات
   const id = e && e.parameter ? e.parameter.id : null;
   const action = e && e.parameter ? e.parameter.action : null;
   const role = e && e.parameter ? e.parameter.role : null;
   try {
+    if (action !== 'approve' && action !== 'reject') {
+      throw 'رابط غير صالح.';
+    }
     const result = handleWorkflowStep(id, action, role);
-    const color = action === 'approve' ? '#166534' : '#991b1b';
+    let color = action === 'approve' ? '#166534' : '#991b1b';
+    if (result.ok === false) color = '#92400e';
     return HtmlService.createHtmlOutput(`
       <div dir="rtl" style="font-family: Arial; text-align: center; padding: 50px;">
-        <h1 style="color: ${color};">${result.message}</h1>
-        <p style="color: #666;">تم تحديث سجلات النظام بنجاح.</p>
+        <h1 style="color: ${color};">${esc(result.message)}</h1>
+        <p style="color: #666;">${result.ok === false ? 'لم يتم تغيير أي شيء في السجلات.' : 'تم تحديث سجلات النظام بنجاح.'}</p>
       </div>
     `);
   } catch (err) {
-    return HtmlService.createHtmlOutput(`<div dir="rtl"><h1>خطأ: ${err.toString()}</h1></div>`);
+    return HtmlService.createHtmlOutput(`<div dir="rtl" style="font-family: Arial; text-align: center; padding: 50px;"><h1 style="color:#991b1b;">خطأ: ${esc(err)}</h1></div>`);
+  }
+}
+
+/**
+ * إرجاع حالة وتوقيعات مجموعة طلبات (حتى 100 طلب) من الشيت
+ */
+function getRequestStatuses(idsParam) {
+  try {
+    const ids = String(idsParam || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean).slice(0, 100);
+    const result = {};
+    if (ids.length === 0) return { success: true, statuses: result };
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, statuses: result };
+
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 14).getValues();
+    for (let i = 0; i < values.length; i++) {
+      const rid = String(values[i][0]);
+      if (ids.indexOf(rid) === -1) continue;
+      let sigs = [];
+      try { sigs = JSON.parse(values[i][13] || '[]'); } catch (e2) {}
+      result[rid] = { status: String(values[i][10] || 'PENDING_MANAGER'), signatures: sigs };
+    }
+    return { success: true, statuses: result };
+  } catch (err) {
+    return { success: false, error: err.toString() };
   }
 }
 
@@ -301,7 +391,8 @@ function getEmployeesData() {
       return { success: true, employees: [], count: 0, totalRows: lastRow };
     }
 
-    var maxCols = Math.max(lastCol, 10);
+    // لا نتجاوز عدد الأعمدة الفعلي للشيت وإلا يفشل getRange إذا كان عدد أعمدة الشيت أقل من 10
+    var maxCols = Math.max(lastCol, 1);
     // قراءة كل الصفوف بالكامل من الصف 1 حتى آخر صف مسجل
     var range = sheet.getRange(1, 1, lastRow, maxCols);
     var values = range.getValues();
@@ -366,6 +457,12 @@ function getEmployeesData() {
         titleCol = 3;
         balanceCol = 4;
         emailCol = 5;
+      }
+
+      // لا توجد عناوين معروفة: إذا كان الصف الأول يبدو كبيانات موظف (كود رقمي) فلا نتخطاه
+      var firstCode = String(values[0][codeCol] || '').trim();
+      if (firstCode && !isNaN(Number(firstCode)) && firstCode.length >= 3) {
+        startRow = 0;
       }
     }
 
@@ -454,9 +551,56 @@ function getEmployeesData() {
   }
 }
 
+/**
+ * تنفيذ خطوة في دورة الاعتماد. يتم القفل لمنع تنفيذ نفس الخطوة مرتين عند النقر المزدوج.
+ * المرحلة تُحدَّد من عمود الحالة في الشيت (وليس من باراميتر role في الرابط)
+ * حتى لا يمكن تخطي المراحل أو اعتماد الطلب من رابط مرحلة أخرى.
+ */
 function handleWorkflowStep(id, action, role) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    return processWorkflowStep_(id, action, role);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * الإيميلات المسموح لها بالاعتماد/الرفض في المرحلة الحالية (من CONFIG فقط)
+ */
+function getAllowedApprovers_(status, empData) {
+  let list = [];
+  if (status === 'PENDING_MANAGER') {
+    list = isWarehouseDirectorRequest(empData)
+      ? [CONFIG.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail]
+      : [getDeptInfo(empData.department).managerEmail];
+  } else if (status === 'PENDING_DEPT_HEAD') {
+    const directMgr = getDeptInfo(empData.department).managerEmail;
+    list = [directMgr === CONFIG.FINAL_APPROVERS.DEPT_HEAD.email
+      ? CONFIG.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail
+      : CONFIG.FINAL_APPROVERS.DEPT_HEAD.email];
+  } else if (status === 'PENDING_HR') {
+    list = getHREmails().split(',');
+  }
+  return list.map(function(e) { return String(e).trim().toLowerCase(); }).filter(Boolean);
+}
+
+/**
+ * إيميل المستخدم الذي فتح الرابط حالياً (يعمل عند النشر داخل نفس نطاق Workspace)
+ */
+function getCurrentActor_() {
+  try {
+    return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (e) {
+    return '';
+  }
+}
+
+function processWorkflowStep_(id, action, role) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
+  if (!sheet || !id) throw "الطلب غير موجود.";
   const values = sheet.getDataRange().getValues();
   let rowIndex = -1;
   let rowData = null;
@@ -486,69 +630,95 @@ function handleWorkflowStep(id, action, role) {
     submitterEmail: String(rowData[14] || '')
   };
   
-  let signatures = JSON.parse(rowData[13] || '[]');
+  let signatures = [];
+  try { signatures = JSON.parse(rowData[13] || '[]'); } catch (parseErr) { signatures = []; }
+  const status = String(rowData[10] || 'PENDING_MANAGER');
   const isDirector = isWarehouseDirectorRequest(empData);
+
+  // الطلب انتهى مسبقاً: لا يمكن اعتماده أو رفضه مرة أخرى (كان الرفض يلغي طلباً معتمداً بالفعل)
+  if (status === 'APPROVED' || status === 'REJECTED') {
+    return { ok: false, message: 'تم البت في هذا الطلب مسبقاً (' + (status === 'APPROVED' ? 'معتمد' : 'مرفوض') + ').' };
+  }
+
+  // الرابط يجب أن يخص المرحلة الحالية للطلب
+  if (STAGE_BY_ROLE[role] !== status) {
+    return { ok: false, message: 'هذا الرابط لم يعد صالحاً: الطلب ليس في مرحلة "' + (role || '-') + '" حالياً.' };
+  }
+
+  // الصلاحية: فقط الإيميلات المسجلة في CONFIG لهذه المرحلة يمكنها الاعتماد أو الرفض
+  const actor = getCurrentActor_();
+  if (!actor) {
+    return { ok: false, message: 'تعذر التحقق من هويتك. افتح الرابط وأنت مسجل الدخول بحساب الشركة (@dakahlia.net).' };
+  }
+  if (getAllowedApprovers_(status, empData).indexOf(actor) === -1) {
+    return { ok: false, message: 'غير مصرح لك: الحساب (' + actor + ') ليس مسجلاً للاعتماد أو الرفض في هذه المرحلة.' };
+  }
 
   if (action === 'reject') {
     sheet.getRange(rowIndex, 11).setValue('REJECTED');
+    notifyRejection_(id, empData, role);
     return { message: "تم رفض الطلب بنجاح." };
   }
 
-  // معالجة استثناء طلب مدير المخازن (أ/ أحمد حمدان)
-  if (isDirector) {
-    if (signatures.indexOf('MANAGER') === -1) {
+  if (status === 'PENDING_MANAGER') {
+    if (isDirector) {
+      // استثناء مدير المخازن: اعتماد أ/ عبد الهادي صالح يمثل اعتماد المدير المباشر ومدير الإدارة معاً
       signatures.push('MANAGER');
-      signatures.push('DEPT_HEAD'); // اعتماد أ/ عبد الهادي صالح يمثل اعتماد المدير المباشر والإدارة لمدير المخازن
+      signatures.push('DEPT_HEAD');
       sheet.getRange(rowIndex, 11).setValue('PENDING_HR');
       sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
       let pdf = generateFinalPDF(id, empData, signatures);
       sendApprovalMail(getHREmails(), 'الموارد البشرية', id, empData, pdf);
       return { message: "تم اعتماد إجازة مدير المخازن بنجاح من أ/ عبد الهادي صالح وإحالتها للموارد البشرية." };
     }
-  } else {
-    // التدفق العادي للأقسام
-    if (role === 'المدير المباشر' && signatures.indexOf('MANAGER') === -1) {
-      signatures.push('MANAGER');
-      signatures.push('MANAGER_APPROVED');
-      sheet.getRange(rowIndex, 11).setValue('PENDING_DEPT_HEAD');
-      sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
-      let pdf = generateFinalPDF(id, empData, signatures);
-      
-      const directMgr = CONFIG.DEPARTMENTS[empData.department]?.managerEmail;
-      // إذا كان المدير المباشر هو نفسه مدير المخازن (أحمد حمدان)، يوجه للمدير الأعلى عليه (أ/ عبد الهادي صالح)
-      if (directMgr === CONFIG.FINAL_APPROVERS.DEPT_HEAD.email) {
-        sendApprovalMail(CONFIG.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail, 'مدير الإدارة (المشرف العام)', id, empData, pdf);
-      } else {
-        sendApprovalMail(CONFIG.FINAL_APPROVERS.DEPT_HEAD.email, 'مدير الإدارة', id, empData, pdf);
-      }
-      return { message: "تم اعتماد المدير المباشر بنجاح." };
-    } 
-    else if ((role === 'مدير الإدارة' || role === 'مدير الإدارة (المشرف العام)') && signatures.indexOf('DEPT_HEAD') === -1) {
-      signatures.push('DEPT_HEAD');
-      sheet.getRange(rowIndex, 11).setValue('PENDING_HR');
-      sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
-      let pdf = generateFinalPDF(id, empData, signatures);
-      sendApprovalMail(getHREmails(), 'الموارد البشرية', id, empData, pdf);
-      return { message: "تم اعتماد مدير الإدارة بنجاح." };
-    }
-  }
 
-  // مرحلة اعتماد الموارد البشرية النهائية
-  if (role === 'الموارد البشرية' && signatures.indexOf('HR') === -1) {
-    signatures.push('HR');
-    signatures.push('APPROVED');
-    sheet.getRange(rowIndex, 11).setValue('APPROVED');
+    signatures.push('MANAGER');
+    sheet.getRange(rowIndex, 11).setValue('PENDING_DEPT_HEAD');
     sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
     let pdf = generateFinalPDF(id, empData, signatures);
 
-    // 1. إرسال نسخة رسمية كاملة التوقيعات لجميع مسؤولي الموارد البشرية (HR)
-    const hrEmails = getHREmails();
-    if (hrEmails) {
-      const hrHtmlBody = `
+    const directMgr = getDeptInfo(empData.department).managerEmail;
+    // إذا كان المدير المباشر هو نفسه مدير الإدارة (أحمد حمدان)، يوجه للمدير الأعلى عليه (أ/ عبد الهادي صالح)
+    if (directMgr === CONFIG.FINAL_APPROVERS.DEPT_HEAD.email) {
+      sendApprovalMail(CONFIG.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail, 'مدير الإدارة (المشرف العام)', id, empData, pdf);
+    } else {
+      sendApprovalMail(CONFIG.FINAL_APPROVERS.DEPT_HEAD.email, 'مدير الإدارة', id, empData, pdf);
+    }
+    return { message: "تم اعتماد المدير المباشر بنجاح." };
+  }
+
+  if (status === 'PENDING_DEPT_HEAD') {
+    signatures.push('DEPT_HEAD');
+    sheet.getRange(rowIndex, 11).setValue('PENDING_HR');
+    sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
+    let pdf = generateFinalPDF(id, empData, signatures);
+    sendApprovalMail(getHREmails(), 'الموارد البشرية', id, empData, pdf);
+    return { message: "تم اعتماد مدير الإدارة بنجاح." };
+  }
+
+  // مرحلة اعتماد الموارد البشرية النهائية (status === 'PENDING_HR')
+  signatures.push('HR');
+  sheet.getRange(rowIndex, 11).setValue('APPROVED');
+  sheet.getRange(rowIndex, 14).setValue(JSON.stringify(signatures));
+  let pdf = generateFinalPDF(id, empData, signatures);
+  sendFinalApprovalMails_(id, empData, pdf);
+  return { message: "تم الاعتماد النهائي للإجازة وتوثيقها (APPROVED) وإرسال النسخ الرسمية للموارد البشرية والموظف بنجاح." };
+}
+
+/**
+ * إرسال النسخة النهائية المعتمدة لمسؤولي الموارد البشرية وللموظف ومنشئ الطلب
+ */
+function sendFinalApprovalMails_(id, empData, pdf) {
+  const s = escObj(empData);
+
+  // 1. نسخة رسمية كاملة التوقيعات لجميع مسؤولي الموارد البشرية (HR)
+  const hrEmails = getHREmails();
+  if (hrEmails) {
+    const hrHtmlBody = `
         <div dir="rtl" style="font-family: Arial, sans-serif; border: 2px solid #166534; padding: 25px; border-radius: 15px; max-width: 600px; margin: auto; background-color: #ffffff;">
           <div style="text-align: center; border-bottom: 2px solid #166534; padding-bottom: 12px; margin-bottom: 15px;">
             <h2 style="color: #166534; margin: 0;">✅ [نسخة الموارد البشرية] تم الاعتماد النهائي للإجازة</h2>
-            <span style="font-size: 13px; color: #555;">طلب رقم: <b style="color: #1e3a8a;">${id}</b> | الحالة: <b style="color: #166534;">معتمد ومكتمل التوقيعات (APPROVED)</b></span>
+            <span style="font-size: 13px; color: #555;">طلب رقم: <b style="color: #1e3a8a;">${esc(id)}</b> | الحالة: <b style="color: #166534;">معتمد ومكتمل التوقيعات (APPROVED)</b></span>
           </div>
           
           <p style="font-size: 14px; color: #222;">الزملاء الأفاضل في <b>إدارة الموارد البشرية</b>،</p>
@@ -557,80 +727,102 @@ function handleWorkflowStep(id, action, role) {
           </p>
 
           <table style="width: 100%; border-collapse: collapse; margin: 15px 0; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0; width: 35%;">اسم الموظف:</td><td style="padding: 8px 12px; font-weight: bold; color: #1e3a8a; border-bottom: 1px solid #e2e8f0;">${empData.employeeName}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">كود الموظف:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${empData.employeeCode}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الوظيفة والقسم:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${empData.jobTitle} - ${empData.department}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">نوع الإجازة:</td><td style="padding: 8px 12px; color: #b45309; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${empData.leaveType}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الفترة:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">من ${empData.startDate} إلى ${empData.endDate} (${empData.daysCount} أيام)</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">ملاحظات / السبب:</td><td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0;">${empData.reason || 'لا يوجد'}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555;">حساب منشئ الطلب:</td><td style="padding: 8px 12px; font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${empData.submitterEmail || 'غير محدد'}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0; width: 35%;">اسم الموظف:</td><td style="padding: 8px 12px; font-weight: bold; color: #1e3a8a; border-bottom: 1px solid #e2e8f0;">${s.employeeName}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">كود الموظف:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${s.employeeCode}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الوظيفة والقسم:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${s.jobTitle} - ${s.department}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">نوع الإجازة:</td><td style="padding: 8px 12px; color: #b45309; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${s.leaveType}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الفترة:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">من ${s.startDate} إلى ${s.endDate} (${s.daysCount} أيام)</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">ملاحظات / السبب:</td><td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0;">${s.reason || 'لا يوجد'}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555;">حساب منشئ الطلب:</td><td style="padding: 8px 12px; font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${s.submitterEmail || 'غير محدد'}</td></tr>
           </table>
 
           <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; padding: 12px; border-radius: 8px; font-size: 13px; color: #065f46; text-align: center; font-weight: bold; margin-top: 15px;">
-            📎 تم إرفاق ملف الاستمارة الرسمية كامل التوقيعات (Leave_Request_${id}.pdf).
+            📎 تم إرفاق ملف الاستمارة الرسمية كامل التوقيعات (Leave_Request_${esc(id)}.pdf).
           </div>
         </div>
       `;
 
-      try {
-        GmailApp.sendEmail(hrEmails, `✅ [نسخة الموارد البشرية] تم الاعتماد النهائي لطلب إجازة: ${empData.employeeName} (${id})`, "", {
-          htmlBody: hrHtmlBody,
-          attachments: [pdf]
-        });
-      } catch (hrErr) {
-        console.error("Error sending email to HR:", hrErr);
-      }
+    try {
+      GmailApp.sendEmail(hrEmails, `✅ [نسخة الموارد البشرية] تم الاعتماد النهائي لطلب إجازة: ${empData.employeeName} (${id})`, "", {
+        htmlBody: hrHtmlBody,
+        attachments: [pdf]
+      });
+    } catch (hrErr) {
+      console.error("Error sending email to HR:", hrErr);
     }
+  }
 
-    // 2. إرسال نسخة رسمية كاملة التوقيعات للموظف (ومنشئ الطلب إن وجد)
-    const employeeRecipients = [];
-    if (empData.employeeEmail && empData.employeeEmail.trim()) {
-      employeeRecipients.push(empData.employeeEmail.trim());
-    }
-    if (empData.submitterEmail && empData.submitterEmail.trim() && employeeRecipients.indexOf(empData.submitterEmail.trim()) === -1) {
-      employeeRecipients.push(empData.submitterEmail.trim());
-    }
+  // 2. نسخة رسمية كاملة التوقيعات للموظف (ومنشئ الطلب إن وجد)
+  const employeeRecipients = [];
+  if (empData.employeeEmail && empData.employeeEmail.trim()) {
+    employeeRecipients.push(empData.employeeEmail.trim());
+  }
+  if (empData.submitterEmail && empData.submitterEmail.trim() && employeeRecipients.indexOf(empData.submitterEmail.trim()) === -1) {
+    employeeRecipients.push(empData.submitterEmail.trim());
+  }
 
-    if (employeeRecipients.length > 0) {
-      const empRecipientsStr = employeeRecipients.join(', ');
-      const empHtmlBody = `
+  if (employeeRecipients.length > 0) {
+    const empRecipientsStr = employeeRecipients.join(', ');
+    const empHtmlBody = `
         <div dir="rtl" style="font-family: Arial, sans-serif; border: 2px solid #1e3a8a; padding: 25px; border-radius: 15px; max-width: 600px; margin: auto; background-color: #ffffff;">
           <div style="text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 15px;">
             <h2 style="color: #1e3a8a; margin: 0;">🎉 تهانينا! تم اعتماد طلب الإجازة النهائي</h2>
-            <span style="font-size: 13px; color: #555;">طلب رقم: <b style="color: #1e3a8a;">${id}</b> | الحالة: <b style="color: #166534;">معتمد وموثق بالكامل (APPROVED)</b></span>
+            <span style="font-size: 13px; color: #555;">طلب رقم: <b style="color: #1e3a8a;">${esc(id)}</b> | الحالة: <b style="color: #166534;">معتمد وموثق بالكامل (APPROVED)</b></span>
           </div>
 
-          <p style="font-size: 14px; color: #222;">عزيزي الزميل/ <b>${empData.employeeName}</b>،</p>
+          <p style="font-size: 14px; color: #222;">عزيزي الزميل/ <b>${s.employeeName}</b>،</p>
           <p style="font-size: 14px; color: #333; line-height: 1.6;">
             تمت الموافقة النهائية واعتماد طلب الإجازة الخاص بكم من قِبل المدير المباشر ومدير الإدارة وإدارة الموارد البشرية. مرفق لسيادتكم <b>النسخة الرسمية الكاملة المعتمدة بجميع التوقيعات والأختام بصيغة PDF</b> للاحتفاظ بها.
           </p>
 
           <table style="width: 100%; border-collapse: collapse; margin: 15px 0; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0; width: 35%;">نوع الإجازة:</td><td style="padding: 8px 12px; color: #b45309; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${empData.leaveType}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">عدد الأيام:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${empData.daysCount} أيام</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الفترة:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">من ${empData.startDate} إلى ${empData.endDate}</td></tr>
-            <tr><td style="padding: 8px 12px; color: #555;">القسم:</td><td style="padding: 8px 12px; font-weight: bold;">${empData.department}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0; width: 35%;">نوع الإجازة:</td><td style="padding: 8px 12px; color: #b45309; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${s.leaveType}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">عدد الأيام:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">${s.daysCount} أيام</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555; border-bottom: 1px solid #e2e8f0;">الفترة:</td><td style="padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">من ${s.startDate} إلى ${s.endDate}</td></tr>
+            <tr><td style="padding: 8px 12px; color: #555;">القسم:</td><td style="padding: 8px 12px; font-weight: bold;">${s.department}</td></tr>
           </table>
 
           <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 8px; font-size: 13px; color: #1e40af; text-align: center; font-weight: bold; margin-top: 15px;">
-            📎 تم إرفاق نسختك الرسمية المعتمدة كاملة التوقيعات (Leave_Request_${id}.pdf).
+            📎 تم إرفاق نسختك الرسمية المعتمدة كاملة التوقيعات (Leave_Request_${esc(id)}.pdf).
           </div>
         </div>
       `;
 
-      try {
-        GmailApp.sendEmail(empRecipientsStr, `✅ تم اعتماد إجازتك وتوثيقها بالكامل - ${empData.employeeName} (${id})`, "", {
-          htmlBody: empHtmlBody,
-          attachments: [pdf]
-        });
-      } catch (empErr) {
-        console.error("Error sending email to employee:", empErr);
-      }
+    try {
+      GmailApp.sendEmail(empRecipientsStr, `✅ تم اعتماد إجازتك وتوثيقها بالكامل - ${empData.employeeName} (${id})`, "", {
+        htmlBody: empHtmlBody,
+        attachments: [pdf]
+      });
+    } catch (empErr) {
+      console.error("Error sending email to employee:", empErr);
     }
-
-    return { message: "تم الاعتماد النهائي للإجازة وتوثيقها (APPROVED) وإرسال النسخ الرسمية للموارد البشرية والموظف بنجاح." };
   }
-  return { message: "الإجراء تم مسبقاً." };
+}
+
+/**
+ * إشعار الموظف ومنشئ الطلب برفض الطلب (كان الرفض يتم بصمت بدون أي إشعار)
+ */
+function notifyRejection_(id, empData, role) {
+  const recipients = [];
+  [empData.employeeEmail, empData.submitterEmail].forEach(function(m) {
+    const t = String(m || '').trim();
+    if (t && recipients.indexOf(t) === -1) recipients.push(t);
+  });
+  if (recipients.length === 0) return;
+
+  const s = escObj(empData);
+  const html = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; border: 2px solid #991b1b; padding: 25px; border-radius: 15px; max-width: 600px; margin: auto;">
+      <h2 style="color: #991b1b; margin: 0 0 12px 0;">تم رفض طلب الإجازة</h2>
+      <p style="font-size: 14px;">عزيزي الزميل/ <b>${s.employeeName}</b>،</p>
+      <p style="font-size: 14px; line-height: 1.6;">نحيطكم علماً بأنه تم رفض طلب الإجازة رقم <b>${esc(id)}</b> (${s.leaveType} - من ${s.startDate} إلى ${s.endDate}) من قِبل: <b>${esc(role)}</b>.</p>
+    </div>
+  `;
+  try {
+    GmailApp.sendEmail(recipients.join(', '), `❌ تم رفض طلب الإجازة (${id})`, "", { htmlBody: html });
+  } catch (err) {
+    console.error("Error sending rejection email:", err);
+  }
 }
 
 function generateFinalPDF(id, data, signatures) {
@@ -638,6 +830,7 @@ function generateFinalPDF(id, data, signatures) {
   template.data = data;
   template.signatures = signatures;
   template.config = CONFIG;
+  template.isDirector = isWarehouseDirectorRequest(data);
   const htmlContent = template.evaluate().getContent();
   const blob = Utilities.newBlob(htmlContent, 'text/html', `Request_${id}.html`);
   return blob.getAs('application/pdf').setName(`Leave_Request_${id}.pdf`);
@@ -653,10 +846,12 @@ function sendApprovalMail(targetEmail, role, id, data, pdfBlob) {
   if (!recipients) return;
 
   const baseUrl = ScriptApp.getService().getUrl();
-  const approveUrl = `${baseUrl}?id=${id}&action=approve&role=${encodeURIComponent(role)}`;
-  const rejectUrl = `${baseUrl}?id=${id}&action=reject&role=${encodeURIComponent(role)}`;
+  const approveUrl = `${baseUrl}?id=${encodeURIComponent(id)}&action=approve&role=${encodeURIComponent(role)}`;
+  const rejectUrl = `${baseUrl}?id=${encodeURIComponent(id)}&action=reject&role=${encodeURIComponent(role)}`;
   
-  const isDirector = isWarehouseDirectorRequest(data);
+  // التنبيه يظهر فقط للمشرف على مدير المخازن (مرحلة المدير المباشر) وليس للموارد البشرية
+  const isDirector = isWarehouseDirectorRequest(data) && STAGE_BY_ROLE[role] === 'PENDING_MANAGER';
+  const d = escObj(data);
   const exceptionNotice = isDirector ? `
     <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-weight: bold; color: #92400e;">
       ⭐ استثناء إداري: هذا الطلب يخص أ/ أحمد حمدان (مدير المخازن) وموجه لسيادتكم للاعتماد بصفتكم المدير المباشر عليه.
@@ -669,18 +864,18 @@ function sendApprovalMail(targetEmail, role, id, data, pdfBlob) {
 
   const htmlBody = `
     <div dir="rtl" style="font-family: Arial, sans-serif; border: 1px solid #e5e7eb; padding: 25px; border-radius: 15px; max-width: 600px; margin: auto;">
-      <h2 style="color: #1e3a8a; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">طلب إجازة للمراجعة - ${role}</h2>
+      <h2 style="color: #1e3a8a; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">طلب إجازة للمراجعة - ${esc(role)}</h2>
       ${exceptionNotice}
       <p>عزيزي <b>المسؤول</b>،</p>
       <p>يرجى مراجعة طلب الإجازة المقدم من الموظف التالي:</p>
       <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
-        <tr><td style="padding: 5px; color: #666;">اسم الموظف:</td><td style="font-weight: bold;">${data.employeeName}</td></tr>
-        ${data.employeeCode ? `<tr><td style="padding: 5px; color: #666;">كود الموظف:</td><td style="font-weight: bold;">${data.employeeCode}</td></tr>` : ''}
-        <tr><td style="padding: 5px; color: #666;">الوظيفة والقسم:</td><td style="font-weight: bold;">${data.jobTitle} - ${data.department}</td></tr>
-        <tr><td style="padding: 5px; color: #666;">نوع الإجازة:</td><td style="color: #f59e0b; font-weight: bold;">${data.leaveType}</td></tr>
-        <tr><td style="padding: 5px; color: #666;">التاريخ:</td><td style="font-weight: bold;">من ${data.startDate} إلى ${data.endDate} (${data.daysCount} أيام)</td></tr>
-        <tr><td style="padding: 5px; color: #666;">البريد الإلكتروني للموظف:</td><td style="font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${empEmail || 'غير محدد'}</td></tr>
-        ${data.submitterEmail && data.submitterEmail !== empEmail ? `<tr><td style="padding: 5px; color: #666;">حساب منشئ الطلب:</td><td style="font-family: monospace;" dir="ltr">${data.submitterEmail}</td></tr>` : ''}
+        <tr><td style="padding: 5px; color: #666;">اسم الموظف:</td><td style="font-weight: bold;">${d.employeeName}</td></tr>
+        ${data.employeeCode ? `<tr><td style="padding: 5px; color: #666;">كود الموظف:</td><td style="font-weight: bold;">${d.employeeCode}</td></tr>` : ''}
+        <tr><td style="padding: 5px; color: #666;">الوظيفة والقسم:</td><td style="font-weight: bold;">${d.jobTitle} - ${d.department}</td></tr>
+        <tr><td style="padding: 5px; color: #666;">نوع الإجازة:</td><td style="color: #f59e0b; font-weight: bold;">${d.leaveType}</td></tr>
+        <tr><td style="padding: 5px; color: #666;">التاريخ:</td><td style="font-weight: bold;">من ${d.startDate} إلى ${d.endDate} (${d.daysCount} أيام)</td></tr>
+        <tr><td style="padding: 5px; color: #666;">البريد الإلكتروني للموظف:</td><td style="font-family: monospace; font-weight: bold; color: #1e3a8a;" dir="ltr">${esc(empEmail) || 'غير محدد'}</td></tr>
+        ${data.submitterEmail && data.submitterEmail !== empEmail ? `<tr><td style="padding: 5px; color: #666;">حساب منشئ الطلب:</td><td style="font-family: monospace;" dir="ltr">${d.submitterEmail}</td></tr>` : ''}
       </table>
       <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
         <a href="${approveUrl}" style="background: #166534; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-left: 10px;">اعتماد الطلب</a>

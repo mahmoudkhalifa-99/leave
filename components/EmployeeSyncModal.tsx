@@ -101,14 +101,14 @@ export const EmployeeSyncModal: React.FC<EmployeeSyncModalProps> = ({
   };
 
   const handleCopyAppsScriptCode = () => {
-    const code = `// دالة سحب كافة الموظفين من شيت Google (ضعها في Code.gs مع نشر نسخة جديدة)
+    const code = `// ملاحظة: هذه الدالة موجودة بنسخة أشمل في ملف backend/Code.gs (تقرأ العناوين تلقائياً). استخدم هذه النسخة المبسطة فقط إذا لم تكن لديك.
 function getEmployeesData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById('1n2sp5TNNGL3M5_LRNJ7IMLXXWoH6-kL8r4eGZokISCs');
   var sheet = ss.getSheetByName('data') || ss.getSheetByName('Data') || ss.getSheets()[0];
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) return { success: true, employees: [] };
   
-  var values = sheet.getRange(1, 1, lastRow, Math.max(sheet.getLastColumn(), 8)).getValues();
+  var values = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getValues();
   var employees = [];
   // قراءة كافة الصفوف بلا حدود
   for (var r = 1; r < values.length; r++) {
@@ -122,7 +122,13 @@ function getEmployeesData() {
       dept: String(row[3] || 'إدارة المخازن').trim(),
       title: String(row[5] || '').trim(),
       annualBalance: Number(row[4]) || 0,
-      email: (code === '70335' ? 'ahmed.hamdan@dakahlia.net' : 'emp.' + code + '@dakahlia.net')
+      email: (function() {
+        for (var k = 0; k < row.length; k++) {
+          var cell = String(row[k] || '').trim();
+          if (cell.indexOf('@') > -1) return cell.toLowerCase();
+        }
+        return code === '70335' ? 'ahmed.hamdan@dakahlia.net' : 'emp.' + code + '@dakahlia.net';
+      })()
     });
   }
   return { success: true, employees: employees, count: employees.length };

@@ -38,6 +38,8 @@ export interface LeaveRequest {
   endDate: string;
   daysCount: number;
   reason: string;
+  displayStartDate?: string;
+  displayEndDate?: string;
   status: RequestStatus;
   createdAt: string;
   displayIssueDate?: string;

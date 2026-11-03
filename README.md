@@ -15,6 +15,10 @@ View your app in AI Studio: https://ai.studio/apps/26a30855-1997-4147-8c1c-a4d6d
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
+
+## Backend (Google Apps Script)
+
+انسخ `backend/Code.gs` و `backend/EmailTemplates.html` إلى مشروع Apps Script المرتبط بالشيت، ثم انشر **نسخة جديدة** من تطبيق الويب (Deploy > Manage deployments > Edit > New version) بعد أي تعديل.
+إذا كان تبويب `Requests_Warehouses_ISO` موجوداً من قبل، أضف في الصف الأول العمود O بعنوان `Submitter Email`.

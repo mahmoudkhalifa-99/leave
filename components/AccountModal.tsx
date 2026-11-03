@@ -59,7 +59,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
     const emp = employees.find(em => em.code === code);
     if (emp) {
-      setEmailInput(`emp.${emp.code}@dakahlia.net`);
+      setEmailInput(emp.email || `emp.${emp.code}@dakahlia.net`);
       setError('');
     }
   };

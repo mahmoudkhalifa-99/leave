@@ -139,8 +139,8 @@
                             <? if (signatures && signatures.indexOf('MANAGER') > -1) { ?>
                                 <div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div>
                                 <span class="approver-email">
-                                    <?= (data.employeeEmail === 'ahmed.hamdan@dakahlia.net' || String(data.employeeName).indexOf('حمدان') > -1) 
-                                        ? 'abdelhady.saleh@dakahlia.net' 
+                                    <?= isDirector 
+                                        ? config.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail 
                                         : (config.DEPARTMENTS[data.department]?.managerEmail || config.DEPARTMENTS["إدارة المخازن"].managerEmail) ?>
                                 </span>
                             <? } ?>
@@ -151,8 +151,8 @@
                             <? if (signatures && signatures.indexOf('DEPT_HEAD') > -1) { ?>
                                 <div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div>
                                 <span class="approver-email">
-                                    <?= (data.employeeEmail === 'ahmed.hamdan@dakahlia.net' || String(data.employeeName).indexOf('حمدان') > -1) 
-                                        ? 'abdelhady.saleh@dakahlia.net' 
+                                    <?= isDirector 
+                                        ? config.WAREHOUSE_DIRECTOR_EXCEPTION.managerEmail 
                                         : config.FINAL_APPROVERS.DEPT_HEAD.email ?>
                                 </span>
                             <? } ?>

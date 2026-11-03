@@ -7,10 +7,20 @@ interface RequestDetailsProps {
   onClose: () => void;
 }
 
+// تهريب النصوص القادمة من المستخدم قبل إدخالها في HTML (النموذج المطبوع ومعاينة النموذج)
+const esc = (val: unknown): string =>
+  String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const LOCAL_CONFIG_EMAILS: any = {
   DEPARTMENTS: {
     "التخطيط و المتابعة": "ahmed.hamdan@dakahlia.net",
     "إدارة المخازن": "ahmed.hamdan@dakahlia.net",
+    "التخطيط": "ahmed.hamdan@dakahlia.net",
     "الخامات": "raw.store.mgr@dakahlia.net",
     "المنتج التام": "finished.store@dakahlia.net",
     "قطع الغيار": "spareparts.store@dakahlia.net",
@@ -22,7 +32,7 @@ const LOCAL_CONFIG_EMAILS: any = {
   HR: "sadat.planning.officer@dakahlia.net",
   HR_EMAILS: [
     "sadat.planning.officer@dakahlia.net",
-    "hr1@dakahlia.net",
+    "taha.zaki@dakahlia.net",
     "hr2@dakahlia.net"
   ]
 };
@@ -30,11 +40,11 @@ const LOCAL_CONFIG_EMAILS: any = {
 export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose }) => {
   const [view, setView] = useState<'iso' | 'doc' | 'workflow'>('iso');
 
+  // استثناء مدير المخازن يطبّق على صاحب الإجازة نفسه فقط (بالكود أو البريد)،
+  // وليس على كل من اسمه "حمدان" أو من أنشأ الطلب نيابةً عنه — نفس منطق الخادم (Code.gs)
   const isAhmedHamdan = 
     request.employeeEmail?.toLowerCase() === 'ahmed.hamdan@dakahlia.net' ||
-    request.employeeCode === '70335' ||
-    request.employeeName?.includes('حمدان') ||
-    request.submitterEmail?.toLowerCase() === 'ahmed.hamdan@dakahlia.net';
+    request.employeeCode === '70335';
 
   const directManagerEmail = isAhmedHamdan 
     ? LOCAL_CONFIG_EMAILS.WAREHOUSE_DIRECTOR_MANAGER 
@@ -43,6 +53,20 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
   const deptHeadEmail = isAhmedHamdan 
     ? LOCAL_CONFIG_EMAILS.WAREHOUSE_DIRECTOR_MANAGER 
     : LOCAL_CONFIG_EMAILS.DEPT_HEAD;
+
+  // الأختام تظهر فقط للمراحل التي تم اعتمادها فعلاً (كانت تظهر APPROVED لكل الطلبات حتى المعلّقة)
+  const sigs = request.signatures || {};
+  const isApprovedFinal = request.status === RequestStatus.APPROVED || (request.status as string) === 'APPROVED';
+  const managerDone = Boolean(sigs.manager) || isApprovedFinal || request.status === RequestStatus.PENDING_DEPT_HEAD || request.status === RequestStatus.PENDING_HR;
+  const deptHeadDone = Boolean(sigs.deptHead) || isApprovedFinal || request.status === RequestStatus.PENDING_HR;
+  const hrDone = Boolean(sigs.hr) || isApprovedFinal;
+  const stampHtml = (done: boolean, email: string) =>
+    done
+      ? `<div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div><span class="approver-email">${esc(email)}</span>`
+      : '';
+
+  const startDisplay = request.displayStartDate || request.startDate;
+  const endDisplay = request.displayEndDate || request.endDate;
 
   const issueDateStr = request.displayIssueDate || new Date().toLocaleDateString('ar-EG');
 
@@ -88,44 +112,41 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
         <table class="content-table">
             <tr>
                 <td style="width: 55%;"><span class="label">تحريراً في:</span> <span class="value">${issueDateStr}</span></td>
-                <td><span class="label">كود الموظف:</span> <span class="value">${request.employeeCode}</span></td>
+                <td><span class="label">كود الموظف:</span> <span class="value">${esc(request.employeeCode)}</span></td>
             </tr>
             <tr>
-                <td><span class="label">أسم الموظف:</span> <span class="value">${request.employeeName}</span></td>
-                <td><span class="label">الوظيفة:</span> <span class="value">${request.jobTitle || 'مسؤول تخطيط ومراقبة المخزون'}</span></td>
+                <td><span class="label">أسم الموظف:</span> <span class="value">${esc(request.employeeName)}</span></td>
+                <td><span class="label">الوظيفة:</span> <span class="value">${esc(request.jobTitle || 'موظف')}</span></td>
             </tr>
             <tr>
                 <td><span class="label">الإدارة:</span> <span class="value">المخازن</span></td>
-                <td><span class="label">القسم:</span> <span class="value">${request.department}</span></td>
+                <td><span class="label">القسم:</span> <span class="value">${esc(request.department)}</span></td>
             </tr>
             <tr>
-                <td><span class="label">عدد الأيام:</span> <span class="value">${request.daysCount} يوم</span></td>
-                <td><span class="label">من</span> <span class="value">${request.startDate}</span> <span class="label">إلى</span> <span class="value">${request.endDate}</span></td>
+                <td><span class="label">عدد الأيام:</span> <span class="value">${esc(request.daysCount)} يوم</span></td>
+                <td><span class="label">من</span> <span class="value">${esc(startDisplay)}</span> <span class="label">إلى</span> <span class="value">${esc(endDisplay)}</span></td>
             </tr>
         </table>
         <div class="notes-row">
-            <span class="label">ملاحظات:</span> <span class="value">${request.reason || '..................................................................................'}</span>
+            <span class="label">ملاحظات:</span> <span class="value">${esc(request.reason) || '..................................................................................'}</span>
         </div>
         <table class="sig-table">
             <tr>
                 <td>
                   الموظف<span class="sig-underline"></span>
-                  <div class="stamp-text" style="color: #1e3a8a; border-color: #1e3a8a;">${request.employeeName}</div>
+                  <div class="stamp-text" style="color: #1e3a8a; border-color: #1e3a8a;">${esc(request.employeeName)}</div>
                 </td>
                 <td>
                   المدير المباشر<span class="sig-underline"></span>
-                  <div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div>
-                  <span class="approver-email">${directManagerEmail}</span>
+                  ${stampHtml(managerDone, directManagerEmail)}
                 </td>
                 <td>
                   مدير الإدارة<span class="sig-underline"></span>
-                  <div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div>
-                  <span class="approver-email">${deptHeadEmail}</span>
+                  ${stampHtml(deptHeadDone, deptHeadEmail)}
                 </td>
                 <td>
                   الموارد البشرية<span class="sig-underline"></span>
-                  <div class="stamp-text" style="color: #166534; border-color: #166534;">APPROVED</div>
-                  <span class="approver-email">${LOCAL_CONFIG_EMAILS.HR}</span>
+                  ${stampHtml(hrDone, LOCAL_CONFIG_EMAILS.HR)}
                 </td>
             </tr>
         </table>
@@ -142,7 +163,7 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
       <html dir="rtl">
       <head>
           <meta charset="UTF-8">
-          <title>طباعة نموذج إجازة - ${request.employeeName} (${request.id})</title>
+          <title>طباعة نموذج إجازة - ${esc(request.employeeName)} (${esc(request.id)})</title>
           <style>
               @page { size: A4 portrait; margin: 15mm 12mm; }
               body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; color: #000; background: #fff; line-height: 1.4; }
@@ -340,7 +361,7 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
                   </div>
                   <div className="grid grid-cols-2 p-2.5 px-4 bg-gray-50/50">
                     <div><span className="font-bold ml-2">أسم الموظف:</span> <span className="font-bold text-[#1e3a8a]">{request.employeeName}</span></div>
-                    <div><span className="font-bold ml-2">الوظيفة:</span> <span className="font-bold text-gray-800">{request.jobTitle || 'مسؤول تخطيط ومراقبة المخزون'}</span></div>
+                    <div><span className="font-bold ml-2">الوظيفة:</span> <span className="font-bold text-gray-800">{request.jobTitle || 'موظف'}</span></div>
                   </div>
                   <div className="grid grid-cols-2 p-2.5 px-4">
                     <div><span className="font-bold ml-2">الإدارة:</span> <span className="font-bold text-gray-800">المخازن</span></div>
@@ -348,7 +369,7 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
                   </div>
                   <div className="grid grid-cols-2 p-2.5 px-4 bg-gray-50/50">
                     <div><span className="font-bold ml-2">عدد الأيام:</span> <span className="font-bold text-blue-900 font-mono">{request.daysCount} يوم</span></div>
-                    <div><span className="font-bold ml-2">من</span> <span className="font-mono font-bold text-blue-900">{request.startDate}</span> <span className="font-bold mx-2">إلى</span> <span className="font-mono font-bold text-blue-900">{request.endDate}</span></div>
+                    <div><span className="font-bold ml-2">من</span> <span className="font-mono font-bold text-blue-900">{startDisplay}</span> <span className="font-bold mx-2">إلى</span> <span className="font-mono font-bold text-blue-900">{endDisplay}</span></div>
                   </div>
                 </div>
 
@@ -437,8 +458,8 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
                   <div className="space-y-3">
                     <div className="flex justify-between border-b pb-2"><span className="text-gray-500 text-sm">نوع الإجازة:</span> <span className="font-bold text-yellow-600">{request.leaveType}</span></div>
                     <div className="flex justify-between border-b pb-2"><span className="text-gray-500 text-sm">مدة الإجازة:</span> <span className="font-bold text-gray-700">{request.daysCount} أيام</span></div>
-                    <div className="flex justify-between border-b pb-2"><span className="text-gray-500 text-sm">تاريخ البداية:</span> <span className="font-bold text-gray-700">{request.startDate}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500 text-sm">تاريخ العودة:</span> <span className="font-bold text-green-700">{request.endDate}</span></div>
+                    <div className="flex justify-between border-b pb-2"><span className="text-gray-500 text-sm">تاريخ البداية:</span> <span className="font-bold text-gray-700">{startDisplay}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500 text-sm">آخر يوم في الإجازة:</span> <span className="font-bold text-green-700">{endDisplay}</span></div>
                   </div>
                 </div>
               </div>
