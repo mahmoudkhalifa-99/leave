@@ -83,21 +83,9 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
                 </td>
                 <td class="title-box">طلب تصريح أجازة</td>
                 <td class="logo-box">
-                    <table style="width: 100%; border-collapse: collapse; border: none;">
-                        <tr>
-                            <td style="border: none; text-align: left; padding: 0; vertical-align: middle; width: 55%;">
-                                <img src="${DAKAHLIA_LOGO_BASE64}" 
-                                     alt="شعار شركة الدقهلية للدواجن" 
-                                     width="115" 
-                                     height="46" 
-                                     style="height: 46px; max-height: 46px; width: auto; vertical-align: middle; display: inline-block;" />
-                            </td>
-                            <td style="border: none; text-align: right; padding: 0 4px 0 0; vertical-align: middle;">
-                                <div style="font-size: 9.5pt; font-weight: bold; color: #1e3a8a; line-height: 1.2;">شركة الدقهلية للدواجن</div>
-                                <div style="font-size: 7.5pt; font-weight: bold; color: #b45309; line-height: 1.2;">قطاع المخازن</div>
-                            </td>
-                        </tr>
-                    </table>
+                    <img src="${DAKAHLIA_LOGO_BASE64}" 
+                         alt="شعار شركة الدقهلية للدواجن" 
+                         style="height: 80px; max-width: 100%; width: auto; display: block; margin: 0 auto;" />
                 </td>
             </tr>
         </table>
@@ -172,7 +160,7 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
               .header-table { width: 100%; border-collapse: collapse; border-bottom: 2.5px solid #000; table-layout: fixed; }
               .header-table td { border-left: 2px solid #000; padding: 8px 6px; vertical-align: middle; text-align: center; }
               .header-table td:last-child { border-left: none; }
-              .logo-box { width: 38%; text-align: left; padding: 6px 10px !important; }
+              .logo-box { width: 38%; text-align: center; padding: 6px 10px !important; }
               .title-box { font-size: 16pt; font-weight: bold; color: #1e3a8a; }
               .meta-inner-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
               .meta-inner-table td { border: none; padding: 2px 6px; text-align: right; }
@@ -300,22 +288,15 @@ export const RequestDetails: React.FC<RequestDetailsProps> = ({ request, onClose
                   </div>
 
                   {/* Logo Box - هنا يظهر اللوجو بدقة وأناقة */}
-                  <div className="col-span-5 p-2 px-3 flex items-center justify-between gap-3 bg-white">
-                    <div className="w-24 h-12 flex items-center justify-center shrink-0">
-                      <img 
-                        src={DAKAHLIA_LOGO_BASE64} 
-                        alt="شعار شركة الدقهلية للدواجن" 
-                        className="max-h-12 w-auto object-contain"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = DAKAHLIA_LOGO_PATH;
-                        }}
-                      />
-                    </div>
-                    <div className="text-right leading-tight">
-                      <div className="text-[12px] font-black text-[#1e3a8a]">شركة الدقهلية للدواجن</div>
-                      <div className="text-[10px] font-bold text-amber-700">قطاع المخازن</div>
-                      <div className="text-[9px] text-gray-400 font-mono">DAKAHLIA POULTRY</div>
-                    </div>
+                  <div className="col-span-5 p-2 flex items-center justify-center bg-white">
+                    <img 
+                      src={DAKAHLIA_LOGO_BASE64} 
+                      alt="شعار شركة الدقهلية للدواجن" 
+                      className="h-16 w-auto max-w-full object-contain mx-auto"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = DAKAHLIA_LOGO_PATH;
+                      }}
+                    />
                   </div>
                 </div>
 
